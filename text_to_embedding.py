@@ -1,6 +1,7 @@
 # @title Step1: CSV 파일에서 뉴스 데이터 import
 import configparser
 import gc
+import json
 import pickle
 
 import pandas as pd
@@ -98,6 +99,19 @@ class Text2Embedding:
 
             with open(f'{data_path}/embeddings/embeddings{int(i/(self.iterate_size))}.pkl', 'wb') as f:
                 pickle.dump(documents_embeddings, f)
+
+            # to ensure embedding map to the correct documents, save with index(class, date, time, source, kind)
+            with open(f'{data_path}/emb_mapper.json', 'r') as f:
+                emb_mapper = json.load(f)
+
+            partial_index = self.data.index[i:i+self.iterate_size][['class', 'date', 'time', 'source', 'kind']]
+            partial_index_joined = partial_index.astype(str).agg('_'.join, axis=1)
+            # update emb_mapper
+            for j, idx in enumerate(partial_index_joined):
+                emb_mapper[idx] = f'embeddings{int(i/(self.iterate_size))}.pkl_{j}'
+            # dump
+            with open(f'{data_path}/emb_mapper.json', 'w') as f:
+                json.dump(emb_mapper, f)
 
             gc.collect()
 

@@ -1,0 +1,31 @@
+Language of Text : Korean
+
+Purpose of Project : Discover trending topics(phrase) in large text datasets using embedding and clustering techniques.
+
+Steps to Achieve the Purpose:
+1. convert text into embedding.
+- in case to reuse embedding and text, save information into mapper
+
+2. load text to process and retrieve embedding from mapper if exists
+
+3. process text with embedding
+- use umap to reduce dimension of embedding
+- use clustering algorithm to cluster embedding(e.g. hdbscan)
+- define and extract information of clusters
+- add more branch of the cluster if needed
+
+4. save processed information into output file
+- save cluster information
+- save any additional information needed for further analysis
+- save time series data of cluster such as frequency over time if applicable, or size of cluster over time
+
+5. analyze more information from clusters
+- calculate statistics of clusters
+- find relationships between clusters
+- track changes of clusters over time(e.g. merge, split, grow, shrink)
+- cluster's evolution analysis(e.g. cluster lifespan, stability with fft or other methods)
+
+6. visualize results
+- plot clusters in 2D or 3D space
+- plot time series data of clusters
+- create interactive visualizations if needed
