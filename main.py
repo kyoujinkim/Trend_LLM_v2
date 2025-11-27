@@ -23,7 +23,7 @@ from visualization import ClusterVisualizer
 class TrendDiscoveryPipeline:
     """Main pipeline for discovering trending topics in text data"""
 
-    def __init__(self, project_config_path: str, api_config_path: str):
+    def __init__(self, project_config, api_config):
         """
         Initialize the pipeline.
 
@@ -31,11 +31,9 @@ class TrendDiscoveryPipeline:
             project_config_path: Path to project configuration file
             api_config_path: Path to API configuration file (with HuggingFace token)
         """
-        self.project_config = configparser.ConfigParser()
-        self.project_config.read(project_config_path)
+        self.project_config = project_config
 
-        self.api_config = configparser.ConfigParser()
-        self.api_config.read(api_config_path)
+        self.api_config = api_config
 
         self.data_path = self.project_config.get('data', 'data_path')
         self.output_path = os.path.join(self.data_path, 'output')

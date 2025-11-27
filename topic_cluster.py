@@ -96,59 +96,6 @@ class BertTopic_morph():
         self.topic_sizes_ = collections.Counter(documents.Topic.values.tolist())
         self.topics_ = documents.Topic.astype(int).tolist()
 
-    def _c_tf_idf(self, documents_per_topic: pd.DataFrame, fit: bool = True):
-        """Calculate c-TF-IDF scores for each topic.
-
-        Arguments:
-            documents_per_topic: DataFrame with 'Topic' and 'Document' columns
-            fit: Whether to fit the vectorizer
-
-        Returns:
-            c_tf_idf: c-TF-IDF matrix
-        """
-        documents = documents_per_topic.Document.values
-        if fit:
-            self.vectorizer_model.fit(documents)
-
-        c_tf_idf = self.vectorizer_model.transform(documents)
-
-        # Calculate IDF
-        n_docs = len(documents)
-        df = np.asarray(c_tf_idf.sum(axis=0)).flatten()
-        idf = np.log(n_docs / (df + 1))
-
-        # Calculate c-TF-IDF
-        c_tf_idf = c_tf_idf.multiply(idf)
-        c_tf_idf = normalize(c_tf_idf, axis=1, norm='l1')
-
-        return c_tf_idf
-
-    def _extract_words_per_topic(self, c_tf_idf: np.ndarray, labels: List[int] = None):
-        """Extract words per topic.
-
-        Arguments:
-            c_tf_idf: c-TF-IDF matrix
-            labels: List of topic labels
-
-        Returns:
-            topic_representations: Dictionary of topic representations
-        """
-        if labels is None:
-            labels = sorted(list(self.topic_sizes_.keys()))
-
-        # Get feature names from vectorizer
-        feature_names = self.vectorizer_model.get_feature_names_out()
-
-        topic_representations = {}
-        for index, topic in enumerate(labels):
-            if topic != -1:
-                # Get top words for this topic
-                words_idx = np.argsort(c_tf_idf[index].toarray()[0])[::-1][:self.top_n_words]
-                words = [(feature_names[idx], c_tf_idf[index, idx]) for idx in words_idx]
-                topic_representations[topic] = words
-
-        return topic_representations
-
     def _save_representative_docs(self, documents: pd.DataFrame, umap_embeddings: np.ndarray, n_docs: int = 3):
         """Save the most representative documents per topic.
 
@@ -227,13 +174,6 @@ class BertTopic_morph():
         # Update topic sizes after remapping
         self._update_topic_sizes(documents_df)
 
-        # Create documents per topic
-        documents_per_topic = documents_df.groupby(["Topic"], as_index=False).agg({"Document": " ".join})
-
-        # Extract topic representations using c-TF-IDF
-        self.c_tf_idf_ = self._c_tf_idf(documents_per_topic)
-        self.topic_representations_ = self._extract_words_per_topic(self.c_tf_idf_)
-
         # Save the top 3 most representative documents per topic
         self._save_representative_docs(documents_df, umap_embeddings)
 
@@ -287,8 +227,7 @@ class BertTopic_morph():
 
 if __name__ == "__main__":
     # Import Embeddings and Documents
-    embed_list = glob('./data/embeddings/*.pkl')
-    embeddings = np.concatenate([pd.read_pickle(f) for f in embed_list], axis=0)
+
     doc_list = glob('./data/news/*.csv')
     documents = pd.concat([pd.read_csv(f, index_col=0) for f in doc_list], axis=0)
 
