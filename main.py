@@ -25,7 +25,7 @@ class TrendDiscoveryPipeline:
 
     def __init__(self, project_config, api_config):
         """
-        Initialize the pipeline.
+        Initialize the pipeline./content/drive/MyDrive/Trend_LLM/data/embeddings
 
         Args:
             project_config_path: Path to project configuration file
@@ -66,7 +66,7 @@ class TrendDiscoveryPipeline:
         t2e.run()
         print("Embeddings generated successfully!")
 
-    def step2_cluster_topics(self, min_topic_size=10, n_gram_range=(1, 2)):
+    def step2_cluster_topics(self, min_topic_size=10, save_path='./', load_model=False):
         """
         Step 2: Cluster embeddings to discover topics.
 
@@ -85,7 +85,7 @@ class TrendDiscoveryPipeline:
 
         # Load documents
         print("Loading documents...")
-        doc_list = glob(f'{self.data_path}/*.csv')
+        doc_list = glob(f'{self.data_path}/news/*.csv')
         if not doc_list:
             print("Warning: No CSV files found in data path. Looking for nested directories...")
             doc_list = glob(f'{self.data_path}/**/*.csv')
@@ -107,10 +107,11 @@ class TrendDiscoveryPipeline:
         doc_strings = (documents['title'].fillna('') + '\n' + documents['cleaned_text']).tolist()
 
         # Initialize and fit topic model
-        print(f"Initializing topic model (min_topic_size={min_topic_size}, n_gram_range={n_gram_range})...")
+        print(f"Initializing topic model (min_topic_size={min_topic_size})...")
         model = BertTopic_morph(
             min_topic_size=min_topic_size,
-            n_gram_range=n_gram_range,
+            save_path=save_path,
+            load_model=load_model,
             verbose=True
         )
 
@@ -120,17 +121,23 @@ class TrendDiscoveryPipeline:
         # Add predictions to documents
         documents['Topic'] = predictions
 
-        # Save results
-        print("Saving clustering results...")
-        model.save_results(f'{self.output_path}/clustering', documents)
-
-        # Save documents with topic assignments
-        documents.to_csv(f'{self.output_path}/documents_with_topics.csv', index=False, encoding='utf-8-sig')
-
-        print(f"Discovered {len(model.topic_representations_)} topics!")
-        print(f"Results saved to {self.output_path}/clustering")
+        print(f"Results saved to {self.output_path}/model")
 
         return model, documents
+
+    def step2_cluster_subtopics(self, parent_topic_id, min_topic_size=5):
+        """
+        Step 2b: Cluster subtopics within a parent topic.
+
+        Args:
+            parent_topic_id: ID of the parent topic to cluster subtopics from
+            min_topic_size: Minimum number of documents in a subtopic
+        """
+        print("\n" + "="*80)
+        print(f"STEP 2b: Clustering Subtopics for Topic {parent_topic_id}")
+        print("="*80)
+
+        print(f"Subtopic results saved to {self.output_path}/model_subtopics")
 
     def step3_analyze_clusters(self, model, documents):
         """
@@ -353,4 +360,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import configparser
+
+    project_config = configparser.ConfigParser()
+    project_config.read('./project_config.ini')
+    config = configparser.ConfigParser()
+    config.read('D:/config.ini')
+
+    pipeline = TrendDiscoveryPipeline(project_config, config)
+
+    pipeline.step2_cluster_topics(save_path='./data/model', load_model=False)

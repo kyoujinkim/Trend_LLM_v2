@@ -8,9 +8,8 @@ from typing import Tuple, Union, List
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
 from umap import UMAP
-from sklearn.cluster import HDBSCAN as SK_HDBSCAN
+from hdbscan import approximate_predict, HDBSCAN
 from sklearn.preprocessing import normalize
 
 class BertTopic_morph():
@@ -18,7 +17,6 @@ class BertTopic_morph():
     def __init__(self,
         language: str = "multilingual",
         top_n_words: int = 10,
-        n_gram_range: Tuple[int, int] = (1, 1),
         min_topic_size: int = 10,
         nr_topics: Union[int, str] = None,
         low_memory: bool = False,
@@ -27,11 +25,12 @@ class BertTopic_morph():
         zeroshot_topic_list: List[str] = None,
         zeroshot_min_similarity: float = 0.7,
         embedding_model=None,
+        save_path='./',
+        load_model: bool = False,
         verbose: bool = False,
     ):
         self.language = language
         self.top_n_words = top_n_words
-        self.n_gram_range = n_gram_range
         self.min_topic_size = min_topic_size
         self.nr_topics = nr_topics
         self.low_memory = low_memory
@@ -40,20 +39,35 @@ class BertTopic_morph():
         self.zeroshot_topic_list = zeroshot_topic_list
         self.zeroshot_min_similarity = zeroshot_min_similarity
         self.embedding_model = embedding_model
+        self.save_path = save_path
+        self.load_model = load_model
         self.verbose = verbose
 
-        self.vectorizer_model = CountVectorizer(ngram_range=self.n_gram_range)
         self.umap_model = UMAP(
             n_neighbors=15,
-            n_components=5,
+            n_components=10,
             min_dist=0.0,
             metric="cosine",
             low_memory=self.low_memory,
         )
 
-        self.hdbscan_model = SK_HDBSCAN(
-            min_cluster_size=self.min_topic_size, metric="euclidean", cluster_selection_method="eom", n_jobs=-1
+        self.hdbscan_model = HDBSCAN(
+            min_cluster_size=self.min_topic_size, metric="euclidean", cluster_selection_method="eom", core_dist_n_jobs=-1
         )
+
+        if self.load_model:
+            model_path = os.path.join(save_path, 'model_components.pkl')
+            if os.path.exists(model_path):
+                with open(model_path, 'rb') as f:
+                    components = pickle.load(f)
+                    self.umap_model = components['umap_model']
+                    self.hdbscan_model = components['hdbscan_model']
+                if self.verbose:
+                    print(f"Loaded model components from {model_path}")
+            else:
+                self.load_model = False
+                if self.verbose:
+                    print(f"No saved model found at {model_path}, initializing new model.")
 
         # Public attributes
         self.topics_ = None
@@ -64,7 +78,6 @@ class BertTopic_morph():
         self.topic_embeddings_ = None
         self._topic_id_to_zeroshot_topic_idx = {}
         self.custom_labels_ = None
-        self.c_tf_idf_ = None
         self.representative_images_ = None
         self.representative_docs_ = {}
         self.topic_aspects_ = {}
@@ -150,18 +163,23 @@ class BertTopic_morph():
         doc_ids = range(len(documents))
         documents_df = pd.DataFrame({"Document": documents, "ID": doc_ids, "Topic": None})
 
-        # UMAP dimensionality reduction
-        umap_embeddings = self.umap_model.fit_transform(embeddings, y=None)
+        if self.load_model:
+            self.umap_embeddings = self.umap_model.transform(embeddings)
+            self.hdbscan_model.generate_prediction_data()
+            labels, probabilities = approximate_predict(self.hdbscan_model, self.umap_embeddings)
+        else:
+            # UMAP dimensionality reduction
+            self.umap_embeddings = self.umap_model.fit_transform(embeddings, y=None)
 
-        # Clustering with HDBSCAN
-        self.hdbscan_model.fit(umap_embeddings, y=None)
-        labels = self.hdbscan_model.labels_
+            # Clustering with HDBSCAN
+            self.hdbscan_model.fit(self.umap_embeddings, y=None)
+            labels = self.hdbscan_model.labels_
+            probabilities = self.hdbscan_model.probabilities_
+
         documents_df["Topic"] = labels
 
         # Update topic sizes
         self._update_topic_sizes(documents_df)
-
-        probabilities = self.hdbscan_model.probabilities_
 
         # Map topics based on frequency
         df = pd.DataFrame(self.topic_sizes_.items(), columns=["Old_Topic", "Size"]).sort_values("Size", ascending=False)
@@ -175,10 +193,29 @@ class BertTopic_morph():
         self._update_topic_sizes(documents_df)
 
         # Save the top 3 most representative documents per topic
-        self._save_representative_docs(documents_df, umap_embeddings)
+        self._save_representative_docs(documents_df, self.umap_embeddings)
+
+        documents_df_tmp = documents_df[documents_df.Topic == -1]
+        documents_df_tmp_umap = self.umap_embeddings[documents_df_tmp.index.tolist()]
+        if len(documents_df_tmp) > 0:
+            # Cluster between the outliers to find potential sub-topics
+            hdbscan_outliers = HDBSCAN(
+                min_cluster_size=max(2, self.min_topic_size // 5),
+                metric="euclidean",
+                cluster_selection_method="eom",
+                core_dist_n_jobs=-1,
+            )
+            hdbscan_outliers.fit(documents_df_tmp_umap, y=None)
+            outlier_labels = hdbscan_outliers.labels_
+            # sort outlier labels
+            documents_df_tmp['Topic'] = outlier_labels
+
 
         predictions = documents_df.Topic.to_list()
         self.probabilities_ = probabilities
+
+        if not self.load_model:
+            self.save_results(self.save_path)
 
         return predictions
 
@@ -191,35 +228,11 @@ class BertTopic_morph():
         """
         os.makedirs(output_path, exist_ok=True)
 
-        # Save topic representations
-        topic_info = []
-        for topic_id, words in self.topic_representations_.items():
-            topic_info.append({
-                'topic_id': topic_id,
-                'size': self.topic_sizes_[topic_id],
-                'top_words': [w[0] for w in words],
-                'word_scores': [float(w[1]) for w in words],
-                'label': self.topic_labels_[topic_id]
-            })
-
-        with open(f'{output_path}/topic_info.json', 'w', encoding='utf-8') as f:
-            json.dump(topic_info, f, ensure_ascii=False, indent=2)
-
-        # Save representative documents
-        with open(f'{output_path}/representative_docs.json', 'w', encoding='utf-8') as f:
-            json.dump(self.representative_docs_, f, ensure_ascii=False, indent=2)
-
-        # Save topic assignments if documents provided
-        if documents_df is not None:
-            documents_df.to_csv(f'{output_path}/topic_assignments.csv', index=False, encoding='utf-8-sig')
-
         # Save model components
         with open(f'{output_path}/model_components.pkl', 'wb') as f:
             pickle.dump({
                 'umap_model': self.umap_model,
                 'hdbscan_model': self.hdbscan_model,
-                'vectorizer_model': self.vectorizer_model,
-                'c_tf_idf': self.c_tf_idf_
             }, f)
 
         if self.verbose:
