@@ -7,27 +7,41 @@ import json
 import os
 from typing import List, Dict
 import torch
+from openai import OpenAI
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 from tqdm import tqdm
+from pydantic import BaseModel
+
+
+class KeyPhrases(BaseModel):
+    LisfOfKeyphrase: List[str]
 
 
 class LLMKeywordExtractor:
     """Extract keywords from clusters using LLM"""
 
-    def __init__(self, config, model_id="google/gemma-2-2b-it", max_keywords=10):
+    def __init__(self, config, model_class="huggingface", model_id="google/gemma-2-2b-it", max_keywords=10):
         """
         Initialize LLM keyword extractor
 
         Args:
             config: Configuration with API keys
-            model_id: HuggingFace model ID for LLM
+            model_class: Class of the model (default: 'huggingface', 'openai')
+            model_id: model ID for LLM(default: 'google/gemma-2-2b-it')
             max_keywords: Maximum number of keywords to extract per cluster
         """
         self.config = config
+        self.model_class = model_class
         self.model_id = model_id
         self.max_keywords = max_keywords
-        self.hb_token = self.config.get('huggingface', 'token')
+
+        if model_class == "huggingface":
+            self.token = self.config.get('huggingface', 'token')
+        elif model_class == 'openai':
+            self.token = self.config.get('openai', 'API_KEY')
+        else:
+            raise ValueError(f"Unsupported model class: {model_class}")
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.tokenizer = None
@@ -38,17 +52,69 @@ class LLMKeywordExtractor:
         if self.model is not None:
             return
 
-        login(token=self.hb_token)
-        print(f"Loading LLM model: {self.model_id}")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto" if self.device == "cuda" else None
+        if self.model_class == "huggingface":
+            login(token=self.token)
+            print(f"Loading LLM model: {self.model_id}")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto" if self.device == "cuda" else None
+            )
+            if self.device == "cpu":
+                self.model = self.model.to(self.device)
+            print(f"Model loaded on {self.device}")
+        elif self.model_class == 'openai':
+            self.model = OpenAI()
+
+    def extract_keywords_from_structured_texts(self, texts: List[str], topic_id: int = None) -> List[str]:
+        """
+        Extract keywords from a list of representative texts
+
+        Args:
+            texts: List of representative documents from a cluster
+            topic_id: Optional topic ID for tracking
+
+        Returns:
+            List of extracted keywords/phrases
+        """
+        self._init_model()
+
+        # Combine texts (limit to avoid token overflow)
+        combined_text = "\n".join(texts[:5])  # Use top 5 representative docs
+
+        # Truncate if too long
+        max_chars = 2000
+        if len(combined_text) > max_chars:
+            combined_text = combined_text[:max_chars]
+
+        # Create prompt for Korean text
+        prompt = f"""다음 텍스트들에서 공통적으로 나타나는 주요 키워드와 핵심 주제를 {self.max_keywords}개 추출해주세요.
+각 키워드는 2-4 단어로 구성된 명사구 형태로 작성해주세요.
+
+텍스트:
+{combined_text}
+
+주요 키워드 ({self.max_keywords}개):"""
+
+        response = self.model.responses.parse(
+            model=self.model_id,
+            input=[
+                {"role": "system", "content": "Extract the event information."},
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            text_format=KeyPhrases,
         )
-        if self.device == "cpu":
-            self.model = self.model.to(self.device)
-        print(f"Model loaded on {self.device}")
+
+        parsed = response.output_parsed
+
+        # Extract keywords from response
+        keywords = parsed.LisfOfKeyphrase[:self.max_keywords]
+
+        return keywords
 
     def extract_keywords_from_texts(self, texts: List[str], topic_id: int = None) -> List[str]:
         """
@@ -135,7 +201,12 @@ class LLMKeywordExtractor:
 
             texts = docs_info.get('text', [])
             if texts:
-                keywords = self.extract_keywords_from_texts(texts, topic_id)
+                if self.model_class == "huggingface":
+                    keywords = self.extract_keywords_from_texts(texts, topic_id)
+                elif self.model_class == 'openai':
+                    keywords = self.extract_keywords_from_structured_texts(texts, topic_id)
+                else:
+                    raise ValueError(f"Unsupported model class: {self.model_class}")
                 topic_keywords[topic_id] = keywords
             else:
                 topic_keywords[topic_id] = []
