@@ -12,7 +12,9 @@ from umap import UMAP
 from hdbscan import approximate_predict, HDBSCAN
 from sklearn.preprocessing import normalize
 
-class BertTopic_morph():
+class BertTopic_doc():
+    """BERTopic-like topic modeling with UMAP and HDBSCAN, including sub-topic parsing."""
+
 
     def __init__(self,
         language: str = "multilingual",
@@ -134,16 +136,35 @@ class BertTopic_morph():
                     closest_indices = np.argsort(distances)[:n_docs]
 
                     # Save representative docs
-                    self.representative_docs_[topic] = [
+                    self.representative_docs_[topic] = {}
+                    self.representative_docs_[topic]['text'] = [
                         documents.iloc[topic_indices[idx]].Document
                         for idx in closest_indices
                     ]
+
+                    # Save subdoc's representative docs
+                    subdoc_dict = {}
+                    subtopics = documents[documents.Topic == topic].SubTopic.unique()
+                    for subtopic in subtopics:
+                        if subtopic != -1:
+                            subtopic_indices = documents[(documents.Topic == topic) & (documents.SubTopic == subtopic)].index.tolist()
+                            if len(subtopic_indices) > 10:
+                                subtopic_embeddings = umap_embeddings[subtopic_indices]
+                                sub_centroid = subtopic_embeddings.mean(axis=0)
+                                sub_distances = np.linalg.norm(subtopic_embeddings - sub_centroid, axis=1)
+                                sub_closest_indices = np.argsort(sub_distances)[:n_docs]
+                                subdoc_dict[subtopic] = [
+                                    documents.iloc[subtopic_indices[idx]].Document
+                                    for idx in sub_closest_indices
+                                ]
+
+                    self.representative_docs_[topic]['subdocs'] = subdoc_dict
 
     def fit_transform(
         self,
         documents: List[str],
         embeddings: np.ndarray = None,
-            ) -> Tuple[List[int], Union[np.ndarray, None]]:
+            ) -> Tuple[List[int], List[int]]:
         """Fit the models on a collection of documents, generate topics,
         and return the probabilities and topic per document.
 
@@ -153,12 +174,9 @@ class BertTopic_morph():
                         instead of the sentence-transformer model
 
         Returns:
-            predictions: Topic predictions for each documents
-            probabilities: The probability of the assigned topic per document.
-                           If `calculate_probabilities` in BERTopic is set to True, then
-                           it calculates the probabilities of all topics across all documents
-                           instead of only the assigned topic. This, however, slows down
-                           computation and may increase memory usage.
+            A tuple of two lists:
+                - List of topic assignments per document
+                - List of sub-topic assignments per document
         """
         doc_ids = range(len(documents))
         documents_df = pd.DataFrame({"Document": documents, "ID": doc_ids, "Topic": None})
@@ -177,27 +195,57 @@ class BertTopic_morph():
             probabilities = self.hdbscan_model.probabilities_
 
         documents_df["Topic"] = labels
+        documents_df["SubTopic"] = -1  # Initialize SubTopic column
 
         # Update topic sizes
         self._update_topic_sizes(documents_df)
-
         # Map topics based on frequency
+        documents_df = self._map_topics(documents_df)
+
+        # Parse cluster within outlier topics
+        while len(documents_df[documents_df.Topic == -1]) > 1000:
+            documents_df = self.outlier_cluster_parsing(documents_df)
+            # Update topic sizes
+            self._update_topic_sizes(documents_df)
+            # Map topics based on frequency
+            documents_df = self._map_topics(documents_df)
+
+        # Parse sub-clusters within each topic
+        documents_df = self.sub_cluster_parsing(documents_df)
+
+        # Save the top 3 most representative documents per topic
+        self._save_representative_docs(documents_df, self.umap_embeddings)
+
+        self.probabilities_ = probabilities
+
+        if not self.load_model:
+            self.save_results(self.save_path)
+
+        return documents_df.Topic, documents_df.SubTopic
+
+    def _map_topics(self, documents: pd.DataFrame):
+        """Map topics based on frequency.
+
+        Arguments:
+            documents: A DataFrame containing a 'Topic' column with topic assignments.
+        """
         df = pd.DataFrame(self.topic_sizes_.items(), columns=["Old_Topic", "Size"]).sort_values("Size", ascending=False)
         df = df[df.Old_Topic != -1]
         sorted_topics = {**{-1: -1}, **dict(zip(df.Old_Topic, range(len(df))))}
 
         # Map documents
-        documents_df.Topic = documents_df.Topic.map(sorted_topics).fillna(documents_df.Topic).astype(int)
+        documents.Topic = documents.Topic.map(sorted_topics).fillna(documents.Topic).astype(int)
 
         # Update topic sizes after remapping
-        self._update_topic_sizes(documents_df)
+        self._update_topic_sizes(documents)
 
-        # Save the top 3 most representative documents per topic
-        self._save_representative_docs(documents_df, self.umap_embeddings)
+        return documents
 
-        documents_df_tmp = documents_df[documents_df.Topic == -1]
-        documents_df_tmp_umap = self.umap_embeddings[documents_df_tmp.index.tolist()]
-        if len(documents_df_tmp) > 0:
+    def outlier_cluster_parsing(self, documents: pd.DataFrame):
+        """Re-cluster outlier documents to find potential sub-topics."""
+        documents_tmp = documents[documents.Topic == -1]
+        documents_tmp_umap = self.umap_embeddings[documents_tmp.index.tolist()]
+        if len(documents_tmp) > 0:
             # Cluster between the outliers to find potential sub-topics
             hdbscan_outliers = HDBSCAN(
                 min_cluster_size=max(2, self.min_topic_size // 5),
@@ -205,19 +253,44 @@ class BertTopic_morph():
                 cluster_selection_method="eom",
                 core_dist_n_jobs=-1,
             )
-            hdbscan_outliers.fit(documents_df_tmp_umap, y=None)
+            hdbscan_outliers.fit(documents_tmp_umap, y=None)
             outlier_labels = hdbscan_outliers.labels_
-            # sort outlier labels
-            documents_df_tmp['Topic'] = outlier_labels
+            # add topic labels to documents
+            for idx, doc_idx in enumerate(documents_tmp.index.tolist()):
+                if outlier_labels[idx] != -1:
+                    documents.at[doc_idx, 'Topic'] = len(self.topic_sizes_) + 1 + outlier_labels[idx]
 
+        return documents
 
-        predictions = documents_df.Topic.to_list()
-        self.probabilities_ = probabilities
+    def sub_cluster_parsing(self, documents: pd.DataFrame):
+        """Re-cluster documents within each topic to find potential sub-topics."""
+        for topic in set(documents.Topic):
+            if topic != -1:
+                if len(documents[documents.Topic == topic]) > 100:
+                    # Get documents and embeddings for this topic
+                    topic_docs = documents[documents.Topic == topic]
+                    topic_indices = topic_docs.index.tolist()
+                    topic_embeddings = self.umap_embeddings[topic_indices]
 
-        if not self.load_model:
-            self.save_results(self.save_path)
+                    # Re-cluster within the topic
+                    hdbscan_sub = HDBSCAN(
+                        min_cluster_size=max(2, self.min_topic_size // 5),
+                        metric="euclidean",
+                        cluster_selection_method="eom",
+                        core_dist_n_jobs=-1,
+                    )
+                    hdbscan_sub.fit(topic_embeddings, y=None)
+                    sub_labels = hdbscan_sub.labels_
+                    # sort sub_labels to start from 0 except -1 based on frequency
+                    sub_label_counts = collections.Counter(sub_labels)
+                    sub_label_mapping = {old_label: new_label for new_label, (old_label, _) in enumerate(sub_label_counts.most_common()) if old_label != -1}
+                    sub_labels_mapped = [sub_label_mapping[label] if label != -1 else -1 for label in sub_labels]
+                    # add sub-topic labels to documents
+                    for idx, doc_idx in enumerate(topic_indices):
+                        documents.at[doc_idx, 'SubTopic'] = sub_labels_mapped[idx]
 
-        return predictions
+        return documents
+
 
     def save_results(self, output_path: str, documents_df: pd.DataFrame = None):
         """Save clustering results to files.
@@ -251,6 +324,6 @@ if __name__ == "__main__":
         return re.sub(clean, '', xml_string)
     documents['cleaned_text'] = documents['content'].apply(extract_text)
 
-    model = BertTopic_morph()
+    model = BertTopic_doc()
     result = model.fit_transform((documents['title'] + '\n' + documents['cleaned_text']).tolist(), embeddings=embeddings)
     a = 1
