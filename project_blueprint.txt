@@ -13,6 +13,7 @@ Steps to Achieve the Purpose:
 - use clustering algorithm to cluster embedding(e.g. hdbscan)
 - define and extract information of clusters
 - with inside of Topic cluser, various sub-topic can be defined by re-clustering inside of cluster if needed
+- extract representative phrases for each cluster(by using LLM model, extract keywords from representative text of cluster)
 
 4. analyze more information from clusters
 - calculate statistics of clusters
