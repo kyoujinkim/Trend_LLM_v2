@@ -53,8 +53,6 @@ class TrendDiscoveryPipeline:
         print("STEP 1: Generating Embeddings")
         print("="*80)
 
-        embedding_files = glob(f'{self.data_path}/embeddings/*.pkl')
-
         print("Initializing Text2Embedding...")
         t2e = Text2Embedding(self.api_config, self.project_config, stdate, enddate, force_regenerate)
 
@@ -136,17 +134,27 @@ class TrendDiscoveryPipeline:
             , max_subtopic_size=self.project_config.getint('clustering', 'max_subtopic_size', fallback=10)
         )
 
-        # Find relationships
-        print("Finding cluster relationships...")
-        cluster_relationships = analyzer.find_cluster_relationships(documents, embeddings, top_k=5)
-
-        # Save analysis
-        #analyzer.save_analysis(os.path.join(self.output_path, 'analysis'))
-
         # Print summary
         print(analyzer.generate_summary_report())
 
-        return cluster_stats, cluster_relationships
+        return cluster_stats
+
+    def step3_2_filter_doc_with_stats(self, documents, embeddings, cluster_stats):
+        # filter documents based on filtered cluster_stats(topic and subtopic)
+        valid_topics = set(cluster_stats.keys())
+        print(f"Filtered documents to {len(documents)} based on cluster statistics")
+        filtered_doc = []
+        for topic in valid_topics:
+            subtopics = set(cluster_stats[topic]['subtopic_stats'].keys() | {-1})
+            filtered_doc.append(documents[((documents['Topic'] == topic) & (documents['Subtopic'].isin(subtopics)))])
+        filtered_doc = pd.concat(filtered_doc)
+
+        documents = filtered_doc.set_index(filtered_doc.columns[0])
+        embeddings = embeddings[documents.index]
+
+        documents = documents.reset_index(drop=True)
+
+        return documents, embeddings
 
     def step4_track_evolution(self, documents, embeddings):
         """
@@ -181,15 +189,18 @@ class TrendDiscoveryPipeline:
         print("Detecting merge/split events...")
         merge_split = tracker.detect_merge_split_events(documents, embeddings)
 
-        # Save results
-        tracker.save_tracking_results(os.path.join(self.output_path, 'tracking'))
+        with open(os.path.join(self.output_path, 'tracking', 'timeline.pkl'), 'wb', encoding='utf-8') as f:
+            pickle.dump(timeline, f)
+
+        with open(os.path.join(self.output_path, 'tracking', 'evolution_events.pkl'), 'wb', encoding='utf-8') as f:
+            pickle.dump(events, f)
 
         # Save stability and merge/split separately
-        with open(os.path.join(self.output_path, 'tracking', 'stability_metrics.json'), 'w', encoding='utf-8') as f:
-            json.dump(stability, f, ensure_ascii=False, indent=2)
+        with open(os.path.join(self.output_path, 'tracking', 'stability_metrics.pkl'), 'wb', encoding='utf-8') as f:
+            pickle.dump(stability, f)
 
-        with open(os.path.join(self.output_path, 'tracking', 'merge_split_events.json'), 'w', encoding='utf-8') as f:
-            json.dump(merge_split, f, ensure_ascii=False, indent=2)
+        with open(os.path.join(self.output_path, 'tracking', 'merge_split_events.pkl'), 'wb', encoding='utf-8') as f:
+            pickle.dump(merge_split, f)
 
         print(f"Detected {len(events)} evolution events")
         print(f"Detected {len(merge_split)} merge/split events")
@@ -416,7 +427,9 @@ if __name__ == "__main__":
 
     # Step 3: Analyze clusters
     if args.step == 0 or args.step == 3:
-        cluster_stats, cluster_relationships = pipeline.step3_analyze_clusters(documents, embeddings)
+        cluster_stats = pipeline.step3_analyze_clusters(documents, embeddings)
+        # filter documents based on filtered cluster_stats(topic and subtopic)
+        documents, embeddings = pipeline.step3_2_filter_doc_with_stats(documents, embeddings, cluster_stats)
 
     # Step 4: Track evolution
     timeline = None

@@ -192,17 +192,16 @@ class ClusterAnalyzer:
 
         filtered_stats = {}
         for topic, stats in tqdm(self.cluster_stats.items()):
-            if stats['avg_similarity'] < 0.5 and stats['size'] < 10:
-                continue
-            # Filter subtopics
-            sub_topic = pd.DataFrame(stats['subtopic_stats']).T
-            if len(sub_topic)>0:
-                sub_topic = sub_topic.sort_values('avg_similarity', ascending=False)
-                sub_topic = sub_topic[sub_topic['size'] > 10].iloc[:max_subtopic_size]
-                filtered_subtopics = sub_topic.to_dict(orient='index')
+            if stats['avg_similarity'] > 0.5 and stats['size'] > 10:
+                # Filter subtopics
+                sub_topic = pd.DataFrame(stats['subtopic_stats']).T
+                if len(sub_topic)>0:
+                    sub_topic = sub_topic.sort_values('size')
+                    sub_topic = sub_topic[sub_topic['size'] > 10].iloc[:max_subtopic_size]
+                    filtered_subtopics = sub_topic.to_dict(orient='index')
 
-            stats['subtopic_stats'] = filtered_subtopics
-            filtered_stats[topic] = stats
+                stats['subtopic_stats'] = filtered_subtopics
+                filtered_stats[topic] = stats
 
         filtered_stats_df = pd.DataFrame(filtered_stats).T.iloc[:max_topic_size]
         filtered_stats = filtered_stats_df.to_dict(orient='index')

@@ -29,11 +29,7 @@ class ClusterTracker:
         self.cluster_timeline = {}
         self.evolution_events = []
 
-    def create_cluster_timeline(
-        self,
-        documents: pd.DataFrame,
-        embeddings: np.ndarray
-    ) -> Dict:
+    def create_cluster_timeline(self, documents: pd.DataFrame, embeddings: np.ndarray) -> Dict:
         """
         Create timeline of cluster evolution
 
@@ -75,7 +71,7 @@ class ClusterTracker:
                 date_topic_docs = topic_docs[topic_docs['date_dt'] == date]
 
                 if len(date_topic_docs) > 0:
-                    date_topic_indices = [documents.index.get_loc(idx) for idx in date_topic_docs.index]
+                    date_topic_indices = date_topic_docs.index.tolist()
                     date_embeddings = embeddings[date_topic_indices]
 
                     # Calculate daily centroid
@@ -386,28 +382,6 @@ class ClusterTracker:
             centroids[topic] = topic_embeddings.mean(axis=0)
 
         return centroids
-
-    def save_tracking_results(self, output_path: str):
-        """
-        Save all tracking results to files
-
-        Args:
-            output_path: Directory to save results
-        """
-        os.makedirs(output_path, exist_ok=True)
-
-        # Save timeline
-        if self.cluster_timeline:
-            with open(os.path.join(output_path, 'cluster_timeline.json'), 'w', encoding='utf-8') as f:
-                json.dump(self.cluster_timeline, f, ensure_ascii=False, indent=2)
-            print(f"Cluster timeline saved to {output_path}/cluster_timeline.json")
-
-        # Save evolution events
-        if self.evolution_events:
-            with open(os.path.join(output_path, 'evolution_events.json'), 'w', encoding='utf-8') as f:
-                json.dump(self.evolution_events, f, ensure_ascii=False, indent=2)
-            print(f"Evolution events saved to {output_path}/evolution_events.json")
-
 
 if __name__ == "__main__":
     # Example usage
