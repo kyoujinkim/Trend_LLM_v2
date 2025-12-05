@@ -13,7 +13,7 @@ from huggingface_hub import login
 import re
 
 class Text2Embedding:
-    def __init__(self, config, project_config, stdate=None, enddate=None):
+    def __init__(self, config, project_config, stdate=None, enddate=None, force_regenerate=False):
         '''
         Initialize the Text2Embedding class
         :param model_id: model path from huggingface
@@ -21,6 +21,7 @@ class Text2Embedding:
         :param project_config: project specific configurations
         :param stdate: start date for data filtering
         :param enddate: end date for data filtering
+        :param force_regenerate: whether to force recalculation of embeddings
         '''
         self.config = config
         self.project_config = project_config
@@ -28,6 +29,7 @@ class Text2Embedding:
         self.model_id = self.project_config.get('embedding', 'model_id')
         self.batch_size = self.project_config.getint('embedding', 'batch_size')
         self.iterate_size = self.project_config.getint('embedding', 'iterate_size')
+        self.force_regenerate = force_regenerate
 
         self.model = self._init_embedding_model()
         self.data = self._load_data(stdate, enddate)
@@ -47,8 +49,9 @@ class Text2Embedding:
         Load data from CSV files
         :return: concatenated dataframe
         '''
-        data_path = self.project_config.get('data', 'data_path')
-        fpath = glob(f'{data_path}/*.csv')
+        news_path = self.project_config.get('data', 'news_path')
+
+        fpath = glob(f'{news_path}/*.csv')
 
         total = []
         for f in tqdm(fpath):
@@ -100,6 +103,17 @@ class Text2Embedding:
             with open(emb_mapper_path, 'w') as f:
                 json.dump({}, f)
 
+        # If document's index exist in emb_mapper, skip embedding
+        with open(emb_mapper_path, 'r') as f:
+            emb_mapper = json.load(f)
+
+        if self.force_regenerate:
+            pass
+        else:
+            existing_indices = set(emb_mapper.keys())
+            self.data['index'] = self.data[['class', 'date', 'time', 'source', 'kind']].astype(str).agg('_'.join, axis=1)
+            self.data = self.data[~self.data['index'].isin(existing_indices)].reset_index(drop=True)
+
         documents = (self.data['title'] + '\n' + self.data['cleaned_text']).tolist()
 
         for i in tqdm(range(0, len(documents), self.iterate_size)):
@@ -112,10 +126,6 @@ class Text2Embedding:
 
             with open(f'{data_path}/embeddings/embeddings{int(i/(self.iterate_size))}.pkl', 'wb') as f:
                 pickle.dump(documents_embeddings, f)
-
-            # to ensure embedding map to the correct documents, save with index(class, date, time, source, kind)
-            with open(emb_mapper_path, 'r') as f:
-                emb_mapper = json.load(f)
 
             # Get the subset of data for this iteration
             partial_data = self.data.iloc[i:i+self.iterate_size]

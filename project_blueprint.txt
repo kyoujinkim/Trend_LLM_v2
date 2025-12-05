@@ -13,13 +13,15 @@ Steps to Achieve the Purpose:
 - use clustering algorithm to cluster embedding(e.g. hdbscan)
 - define and extract information of clusters
 - with inside of Topic cluser, various sub-topic can be defined by re-clustering inside of cluster if needed
-- extract representative phrases for each cluster(by using LLM model, extract keywords from representative text of cluster)
 
 4. analyze more information from clusters
-- calculate statistics of clusters
-- find relationships between clusters
-- track changes of clusters over time(e.g. merge, split, grow, shrink)
-- cluster's evolution analysis(e.g. cluster lifespan, stability with fft or other methods)
+- calculate statistics of clusters and sub-clusters(e.g. size, density, distance to other clusters)
+- find relationships between clusters and sub-clusters(e.g. similarity, hierarchy)
+- track changes of clusters over time(e.g. merge, split, grow, shrink). Also, track change of sub cluster inside of cluster
+- cluster(and sub clusters)'s evolution analysis(e.g. cluster lifespan, stability with fft or other methods)
+
+5. Get Key Phrases from Clusters
+- extract representative phrases for each cluster(by using LLM model, extract keywords from representative text of cluster)
 
 5. visualize results
 - plot clusters in 2D or 3D space

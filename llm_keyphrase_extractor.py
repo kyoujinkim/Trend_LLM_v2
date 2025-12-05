@@ -16,12 +16,13 @@ from pydantic import BaseModel
 
 class KeyPhrases(BaseModel):
     LisfOfKeyphrase: List[str]
+    Category: str
 
 
-class LLMKeywordExtractor:
-    """Extract keywords from clusters using LLM"""
+class LLMKeyphraseExtractor:
+    """Extract Keyphrases from clusters using LLM"""
 
-    def __init__(self, config, model_class="huggingface", model_id="google/gemma-2-2b-it", max_keywords=10):
+    def __init__(self, config, project_config):
         """
         Initialize LLM keyword extractor
 
@@ -32,20 +33,24 @@ class LLMKeywordExtractor:
             max_keywords: Maximum number of keywords to extract per cluster
         """
         self.config = config
-        self.model_class = model_class
-        self.model_id = model_id
-        self.max_keywords = max_keywords
+        self.project_config = project_config
+        self.model_class = project_config.get('keyphraseextract', 'model_class', fallback='huggingface')
+        self.model_id = project_config.get('keyphraseextract', 'model_id', fallback='LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct')
+        self.max_keyphrase = project_config.getint('keyphraseextract', 'max_keyphrase', fallback=5)
+        self.max_topic_size = project_config.getint('keyphraseextract', 'max_topic_size', fallback=50)
+        self.max_subtopic_size = project_config.getint('keyphraseextract', 'max_subtopic_size', fallback=5)
+        self.model = None
+        self.tokenizer = None
 
-        if model_class == "huggingface":
+        if self.model_class == "huggingface":
             self.token = self.config.get('huggingface', 'token')
-        elif model_class == 'openai':
+        elif self.model_class == 'openai':
             self.token = self.config.get('openai', 'API_KEY')
         else:
-            raise ValueError(f"Unsupported model class: {model_class}")
+            raise ValueError(f"Unsupported model class: {self.model_class}")
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.tokenizer = None
-        self.model = None
+        self.max_new_tokens = project_config.getint('keyphraseextract', 'max_new_tokens', fallback=150)
 
     def _init_model(self):
         """Initialize the LLM model"""
@@ -65,7 +70,7 @@ class LLMKeywordExtractor:
                 self.model = self.model.to(self.device)
             print(f"Model loaded on {self.device}")
         elif self.model_class == 'openai':
-            self.model = OpenAI()
+            self.model = OpenAI(api_key=self.token)
 
     def extract_keywords_from_structured_texts(self, texts: List[str], topic_id: int = None) -> List[str]:
         """
@@ -89,13 +94,14 @@ class LLMKeywordExtractor:
             combined_text = combined_text[:max_chars]
 
         # Create prompt for Korean text
-        prompt = f"""다음 텍스트들에서 공통적으로 나타나는 주요 키워드와 핵심 주제를 {self.max_keywords}개 추출해주세요.
-각 키워드는 2-4 단어로 구성된 명사구 형태로 작성해주세요.
-
-텍스트:
-{combined_text}
-
-주요 키워드 ({self.max_keywords}개):"""
+        prompt = f"""다음 텍스트들에서 공통적으로 나타나는 주요 키워드와 핵심 주제를 {self.max_keyphrase}개 추출해주세요.
+        **각 키워드는 2-4 단어로 구성된 명사구 형태로 작성해주세요.**
+        **핵심 주제(Category)는 [경제, 정치, 사회, 문화, 기술] 중 하나로 분류해주세요.**
+        
+        텍스트:
+        {combined_text}
+        
+        주요 키워드 ({self.max_keyphrase}개):"""
 
         response = self.model.responses.parse(
             model=self.model_id,
@@ -112,9 +118,10 @@ class LLMKeywordExtractor:
         parsed = response.output_parsed
 
         # Extract keywords from response
-        keywords = parsed.LisfOfKeyphrase[:self.max_keywords]
+        keywords = parsed.LisfOfKeyphrase[:self.max_keyphrase]
+        category = parsed.Category
 
-        return keywords
+        return keywords, category
 
     def extract_keywords_from_texts(self, texts: List[str], topic_id: int = None) -> List[str]:
         """
@@ -130,7 +137,7 @@ class LLMKeywordExtractor:
         self._init_model()
 
         # Combine texts (limit to avoid token overflow)
-        combined_text = "\n".join(texts[:5])  # Use top 5 representative docs
+        combined_text = "\n\n-".join(texts[:5])  # Use top 5 representative docs
 
         # Truncate if too long
         max_chars = 2000
@@ -138,13 +145,13 @@ class LLMKeywordExtractor:
             combined_text = combined_text[:max_chars]
 
         # Create prompt for Korean text
-        prompt = f"""다음 텍스트들에서 공통적으로 나타나는 주요 키워드와 핵심 주제를 {self.max_keywords}개 추출해주세요.
-각 키워드는 2-4 단어로 구성된 명사구 형태로 작성하고, 쉼표로 구분해주세요.
-
-텍스트:
-{combined_text}
-
-주요 키워드 ({self.max_keywords}개):"""
+        prompt = f"""다음 텍스트들에서 공통적으로 나타나는 주요 키워드와 핵심 주제를 {self.max_keyphrase}개 추출해주세요.
+        각 키워드는 2-4 단어로 구성된 명사구 형태로 작성하고, 쉼표로 구분해주세요.
+        
+        텍스트:
+        {combined_text}
+        
+        주요 키워드 ({self.max_keyphrase}개):"""
 
         # Generate keywords
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
@@ -153,7 +160,7 @@ class LLMKeywordExtractor:
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=150,
+                max_new_tokens=self.max_new_tokens,
                 temperature=0.7,
                 top_p=0.9,
                 do_sample=True,
@@ -170,7 +177,7 @@ class LLMKeywordExtractor:
             keywords_part = keywords_part.split(":", 1)[-1].strip()
             # Split by comma and clean
             keywords = [kw.strip() for kw in keywords_part.split(",")]
-            keywords = [kw for kw in keywords if kw and len(kw) > 1][:self.max_keywords]
+            keywords = [kw for kw in keywords if kw and len(kw) > 1][:self.max_keyphrase]
         else:
             keywords = []
 
@@ -195,19 +202,20 @@ class LLMKeywordExtractor:
         topic_keywords = {}
 
         print(f"Extracting keywords for {len(representative_docs)} topics...")
-        for topic_id, docs_info in tqdm(representative_docs.items(), desc="Extracting keywords"):
+        for topic_id, docs_info in tqdm(representative_docs.items(), total=self.max_topic_size, desc="Extracting keywords"):
             if topic_id == -1:
                 continue
 
             texts = docs_info.get('text', [])
             if texts:
                 if self.model_class == "huggingface":
-                    keywords = self.extract_keywords_from_texts(texts, topic_id)
+                    keywords, category = self.extract_keywords_from_texts(texts, topic_id)
                 elif self.model_class == 'openai':
-                    keywords = self.extract_keywords_from_structured_texts(texts, topic_id)
+                    keywords, category = self.extract_keywords_from_structured_texts(texts, topic_id)
                 else:
                     raise ValueError(f"Unsupported model class: {self.model_class}")
-                topic_keywords[topic_id] = keywords
+                topic_keywords[topic_id] = {'keywords': keywords, 'category': category}
+
             else:
                 topic_keywords[topic_id] = []
 
@@ -238,17 +246,23 @@ class LLMKeywordExtractor:
         subtopic_keywords = {}
 
         print(f"Extracting keywords for subtopics...")
-        for topic_id, docs_info in tqdm(representative_docs.items(), desc="Processing topics"):
+        for topic_id, docs_info in tqdm(representative_docs.items(), total=self.max_topic_size, desc="Processing topics"):
             if topic_id == -1:
                 continue
 
             subdocs = docs_info.get('subdocs', {})
             if subdocs:
-                subtopic_keywords[topic_id] = {}
                 for subtopic_id, texts in subdocs.items():
+                    if subtopic_id == -1:
+                        continue
                     if texts:
-                        keywords = self.extract_keywords_from_texts(texts, subtopic_id)
-                        subtopic_keywords[topic_id][subtopic_id] = keywords
+                        if self.model_class == "huggingface":
+                            keywords, category = self.extract_keywords_from_texts(texts, topic_id)
+                        elif self.model_class == 'openai':
+                            keywords, category = self.extract_keywords_from_structured_texts(texts, topic_id)
+                        else:
+                            raise ValueError(f"Unsupported model class: {self.model_class}")
+                        subtopic_keywords[f'{topic_id}/{subtopic_id}'] = {'keywords': keywords, 'category': category}
 
         # Save results if path provided
         if save_path:
@@ -275,8 +289,10 @@ if __name__ == "__main__":
 
     config = configparser.ConfigParser()
     config.read('D:/config.ini')
+    project_config = configparser.ConfigParser()
+    project_config.read('./project_config.ini')
 
-    extractor = LLMKeywordExtractor(config)
+    extractor = LLMKeyphraseExtractor(config, project_config)
 
     # Example representative docs
     sample_docs = {

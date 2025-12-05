@@ -12,6 +12,8 @@ import json
 import os
 from collections import defaultdict
 
+from tqdm import tqdm
+
 
 class ClusterTracker:
     """Track cluster evolution and changes over time"""
@@ -301,7 +303,7 @@ class ClusterTracker:
         # Track cluster centroids over time windows
         window_size = self.time_window
 
-        for i in range(len(unique_dates) - window_size):
+        for i in tqdm(range(len(unique_dates) - window_size)):
             # Define two time windows
             window1_dates = unique_dates[i:i+window_size]
             window2_dates = unique_dates[i+window_size:i+2*window_size]

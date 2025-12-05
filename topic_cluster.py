@@ -17,33 +17,15 @@ class BertTopic_doc():
 
 
     def __init__(self,
-        language: str = "multilingual",
-        top_n_words: int = 10,
-        min_topic_size: int = 10,
-        nr_topics: Union[int, str] = None,
+        min_topic_size: int = 15,
         low_memory: bool = False,
-        calculate_probabilities: bool = False,
-        seed_topic_list: List[List[str]] = None,
-        zeroshot_topic_list: List[str] = None,
-        zeroshot_min_similarity: float = 0.7,
-        embedding_model=None,
         save_path='./',
         load_model: bool = False,
-        verbose: bool = False,
     ):
-        self.language = language
-        self.top_n_words = top_n_words
         self.min_topic_size = min_topic_size
-        self.nr_topics = nr_topics
         self.low_memory = low_memory
-        self.calculate_probabilities = calculate_probabilities
-        self.seed_topic_list = seed_topic_list
-        self.zeroshot_topic_list = zeroshot_topic_list
-        self.zeroshot_min_similarity = zeroshot_min_similarity
-        self.embedding_model = embedding_model
         self.save_path = save_path
         self.load_model = load_model
-        self.verbose = verbose
 
         self.umap_model = UMAP(
             n_neighbors=15,
@@ -64,43 +46,19 @@ class BertTopic_doc():
                     components = pickle.load(f)
                     self.umap_model = components['umap_model']
                     self.hdbscan_model = components['hdbscan_model']
-                if self.verbose:
-                    print(f"Loaded model components from {model_path}")
+                print(f"Loaded model components from {model_path}")
             else:
                 self.load_model = False
-                if self.verbose:
-                    print(f"No saved model found at {model_path}, initializing new model.")
+                print(f"No saved model found at {model_path}, initializing new model.")
 
         # Public attributes
         self.topics_ = None
         self.probabilities_ = None
         self.topic_sizes_ = None
-        self.topic_mapper_ = None
-        self.topic_representations_ = None
-        self.topic_embeddings_ = None
-        self._topic_id_to_zeroshot_topic_idx = {}
-        self.custom_labels_ = None
-        self.representative_images_ = None
         self.representative_docs_ = {}
-        self.topic_aspects_ = {}
 
         # Private attributes for internal tracking purposes
         self._merged_topics = None
-
-    @property
-    def topic_labels_(self):
-        """Map topic IDs to their labels.
-        A label is the topic ID, along with the first four words of the topic representation, joined using '_'.
-        Zeroshot topic labels come from self.zeroshot_topic_list rather than the calculated representation.
-
-        Returns:
-            topic_labels: a dict mapping a topic ID (int) to its label (str)
-        """
-        topic_labels = {
-            key: f"{key}_" + "_".join([word[0] for word in values[:4]])
-            for key, values in self.topic_representations_.items()
-        }
-        return topic_labels
 
     def _update_topic_sizes(self, documents: pd.DataFrame):
         """Update topic sizes based on a DataFrame of documents.
@@ -308,8 +266,7 @@ class BertTopic_doc():
                 'hdbscan_model': self.hdbscan_model,
             }, f)
 
-        if self.verbose:
-            print(f"Results saved to {output_path}")
+        print(f"Results saved to {output_path}")
 
 if __name__ == "__main__":
     # Import Embeddings and Documents

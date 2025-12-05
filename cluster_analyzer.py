@@ -11,6 +11,8 @@ from scipy.stats import entropy
 import json
 import os
 
+from tqdm import tqdm
+
 
 class ClusterAnalyzer:
     """Analyze cluster statistics and relationships"""
@@ -38,7 +40,7 @@ class ClusterAnalyzer:
 
         unique_topics = sorted([t for t in documents['Topic'].unique() if t != -1])
 
-        for topic in unique_topics:
+        for topic in tqdm(unique_topics):
             topic_docs = documents[documents['Topic'] == topic]
             topic_indices = topic_docs.index.tolist()
             topic_embeddings = embeddings[topic_indices]
@@ -64,7 +66,7 @@ class ClusterAnalyzer:
                 avg_similarity = 1.0
 
             # Subtopic diversity
-            subtopic_counts = topic_docs['SubTopic'].value_counts()
+            subtopic_counts = topic_docs['Subtopic'].value_counts()
             n_subtopics = len([st for st in subtopic_counts.index if st != -1])
 
             # Calculate entropy of subtopic distribution (higher = more diverse)
@@ -73,6 +75,23 @@ class ClusterAnalyzer:
                 subtopic_entropy = entropy(subtopic_probs)
             else:
                 subtopic_entropy = 0.0
+
+            subtopic_stat = {}
+            unique_subtopics = sorted([t for t in topic_docs['Subtopic'].unique() if t != -1])
+            for subtopic in unique_subtopics:
+                subtopic_docs = topic_docs[topic_docs['Subtopic'] == subtopic]
+                subtopic_indices = subtopic_docs.index.tolist()
+                subtopic_embeddings = embeddings[subtopic_indices]
+
+                # Additional subtopic-level statistics can be calculated here if needed
+                pairwise_sim = cosine_similarity(subtopic_embeddings)
+                # Exclude diagonal
+                mask = ~np.eye(pairwise_sim.shape[0], dtype=bool)
+                subtopic_avg_similarity = pairwise_sim[mask].mean()
+                subtopic_stat[subtopic] = {
+                    'size': len(subtopic_docs),
+                    'avg_similarity': float(subtopic_avg_similarity)
+                }
 
             # Time-based statistics if date information is available
             if 'date' in topic_docs.columns:
@@ -101,6 +120,7 @@ class ClusterAnalyzer:
                 'date_range_days': date_range,
                 'daily_activity_mean': float(activity_mean) if activity_mean is not None else None,
                 'daily_activity_std': float(activity_std) if activity_std is not None else None,
+                'subtopic_stats': subtopic_stat
             }
 
         self.cluster_stats = stats
@@ -159,6 +179,38 @@ class ClusterAnalyzer:
 
         self.cluster_relationships = relationships
         return relationships
+
+    def filter_clusters_by_stat(self, max_topic_size, max_subtopic_size):
+        """
+        Filter clusters and subtopics based on avg_similarity and size>10.
+        Args:
+            max_topic_size: maximum size of topic to keep
+            max_subtopic_size: maximum size of subtopic to keep
+        """
+        if not self.cluster_stats:
+            return
+
+        filtered_stats = {}
+        for topic, stats in tqdm(self.cluster_stats.items()):
+            if stats['avg_similarity'] < 0.5 and stats['size'] < 10:
+                continue
+            # Filter subtopics
+            sub_topic = pd.DataFrame(stats['subtopic_stats']).T
+            if len(sub_topic)>0:
+                sub_topic = sub_topic.sort_values('avg_similarity', ascending=False)
+                sub_topic = sub_topic[sub_topic['size'] > 10].iloc[:max_subtopic_size]
+                filtered_subtopics = sub_topic.to_dict(orient='index')
+
+            stats['subtopic_stats'] = filtered_subtopics
+            filtered_stats[topic] = stats
+
+        filtered_stats_df = pd.DataFrame(filtered_stats).T.iloc[:max_topic_size]
+        filtered_stats = filtered_stats_df.to_dict(orient='index')
+
+        self.cluster_stats = filtered_stats
+
+        return filtered_stats
+
 
     def analyze_cluster_overlap(
         self,
