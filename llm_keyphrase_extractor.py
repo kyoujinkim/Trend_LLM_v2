@@ -12,7 +12,9 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from huggingface_hub import login
 from tqdm import tqdm
 from pydantic import BaseModel
+import httpx
 
+http_client = httpx.Client(verify=False)
 
 class KeyPhrases(BaseModel):
     LisfOfKeyphrase: List[str]
@@ -70,7 +72,7 @@ class LLMKeyphraseExtractor:
                 self.model = self.model.to(self.device)
             print(f"Model loaded on {self.device}")
         elif self.model_class == 'openai':
-            self.model = OpenAI(api_key=self.token)
+            self.model = OpenAI(api_key=self.token, http_client=http_client)
 
     def extract_keywords_from_structured_texts(self, texts: List[str], topic_id: int = None) -> List[str]:
         """

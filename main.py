@@ -139,7 +139,7 @@ class TrendDiscoveryPipeline:
 
         return cluster_stats
 
-    def step3_2_filter_doc_with_stats(self, documents, embeddings, cluster_stats):
+    def step3_2_filter_doc_with_stats(self, documents, representative_docs, embeddings, cluster_stats):
         # filter documents based on filtered cluster_stats(topic and subtopic)
         valid_topics = set(cluster_stats.keys())
         print(f"Filtered documents to {len(documents)} based on cluster statistics")
@@ -152,9 +152,19 @@ class TrendDiscoveryPipeline:
         documents = filtered_doc.set_index(filtered_doc.columns[0])
         embeddings = embeddings[documents.index]
 
+        # filter representative_docs based on valid_topics and valid subtopics
+        filtered_representative_docs = {}
+        for topic in valid_topics:
+            if topic in representative_docs:
+                filtered_representative_docs[topic] = {}
+                subtopics = set(cluster_stats[topic]['subtopic_stats'].keys() | {-1})
+                for subtopic in subtopics:
+                    if subtopic in representative_docs[topic]:
+                        filtered_representative_docs[topic][subtopic] = representative_docs[topic][subtopic]
+
         documents = documents.reset_index(drop=True)
 
-        return documents, embeddings
+        return documents, embeddings, filtered_representative_docs
 
     def step4_track_evolution(self, documents, embeddings):
         """
@@ -429,7 +439,7 @@ if __name__ == "__main__":
     if args.step == 0 or args.step == 3:
         cluster_stats = pipeline.step3_analyze_clusters(documents, embeddings)
         # filter documents based on filtered cluster_stats(topic and subtopic)
-        documents, embeddings = pipeline.step3_2_filter_doc_with_stats(documents, embeddings, cluster_stats)
+        documents, embeddings, representative_docs = pipeline.step3_2_filter_doc_with_stats(documents, representative_docs, embeddings, cluster_stats)
 
     # Step 4: Track evolution
     timeline = None
