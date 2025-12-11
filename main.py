@@ -189,17 +189,17 @@ class TrendDiscoveryPipeline:
         print("Detecting merge/split events...")
         merge_split = tracker.detect_merge_split_events(documents, embeddings)
 
-        with open(os.path.join(self.output_path, 'tracking', 'timeline.pkl'), 'wb', encoding='utf-8') as f:
+        with open(os.path.join(self.output_path, 'tracking', 'timeline.pkl'), 'wb') as f:
             pickle.dump(timeline, f)
 
-        with open(os.path.join(self.output_path, 'tracking', 'evolution_events.pkl'), 'wb', encoding='utf-8') as f:
+        with open(os.path.join(self.output_path, 'tracking', 'evolution_events.pkl'), 'wb') as f:
             pickle.dump(events, f)
 
         # Save stability and merge/split separately
-        with open(os.path.join(self.output_path, 'tracking', 'stability_metrics.pkl'), 'wb', encoding='utf-8') as f:
+        with open(os.path.join(self.output_path, 'tracking', 'stability_metrics.pkl'), 'wb') as f:
             pickle.dump(stability, f)
 
-        with open(os.path.join(self.output_path, 'tracking', 'merge_split_events.pkl'), 'wb', encoding='utf-8') as f:
+        with open(os.path.join(self.output_path, 'tracking', 'merge_split_events.pkl'), 'wb') as f:
             pickle.dump(merge_split, f)
 
         print(f"Detected {len(events)} evolution events")
