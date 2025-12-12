@@ -29,6 +29,51 @@ class ClusterTracker:
         self.cluster_timeline = {}
         self.evolution_events = []
 
+    def _calculate_daily_metrics(self, docs, subtopics, date: pd.Timestamp, embeddings: np.ndarray, centroid: np.ndarray):
+        daily_docs = docs[docs['date_dt'] == date]
+        if len(daily_docs) > 0:
+            daily_indices = daily_docs.index.tolist()
+            daily_embeddings = embeddings[daily_indices]
+
+            # Calculate daily centroid
+            daily_centroid = daily_embeddings.mean(axis=0)
+
+            # Calculate drift from overall centroid
+            drift = float(1 - cosine_similarity([centroid], [daily_centroid])[0, 0])
+
+            # Calculate daily cohesion
+            distances = np.linalg.norm(daily_embeddings - daily_centroid, axis=1)
+            cohesion = float(distances.mean())
+
+            subtopics_metric = []
+            for subtopic in subtopics:
+                subtopic_docs = daily_docs[daily_docs['Subtopic'] == subtopic]
+                if len(subtopic_docs) > 0:
+                    subtopic_indices = subtopic_docs.index.tolist()
+                    subtopic_embeddings = embeddings[subtopic_indices]
+                    subtopic_centroid = subtopic_embeddings.mean(axis=0)
+                    subtopic_drift = float(1 - cosine_similarity([centroid], [subtopic_centroid])[0, 0])
+                else:
+                    subtopic_drift = None
+                subtopics_metric.append(subtopic_drift)
+
+        else:
+            drift = None
+            cohesion = None
+            subtopics_metric = [None for _ in subtopics]
+
+        daily_metric = {
+            'date': date.strftime('%Y-%m-%d'),
+            'count': len(daily_docs),
+            'drift': drift,
+            'cohesion': cohesion
+        }
+
+        for i, subtopic in enumerate(subtopics):
+            daily_metric[f'subtopic_{subtopic}_drift'] = subtopics_metric[i]
+
+        return daily_metric
+
     def create_cluster_timeline(self, documents: pd.DataFrame, embeddings: np.ndarray) -> Dict:
         """
         Create timeline of cluster evolution
@@ -64,39 +109,15 @@ class ClusterTracker:
             # Calculate centroid
             centroid = topic_embeddings.mean(axis=0)
 
+            # get list of subtopics
+            subtopics = topic_docs['Subtopic'].unique().tolist() if 'Subtopic' in topic_docs.columns else []
+
             # Track metrics over time
             daily_metrics = []
 
             for date in unique_dates:
-                date_topic_docs = topic_docs[topic_docs['date_dt'] == date]
-
-                if len(date_topic_docs) > 0:
-                    date_topic_indices = date_topic_docs.index.tolist()
-                    date_embeddings = embeddings[date_topic_indices]
-
-                    # Calculate daily centroid
-                    daily_centroid = date_embeddings.mean(axis=0)
-
-                    # Calculate drift from overall centroid
-                    drift = float(1 - cosine_similarity([centroid], [daily_centroid])[0, 0])
-
-                    # Calculate daily cohesion
-                    distances = np.linalg.norm(date_embeddings - daily_centroid, axis=1)
-                    cohesion = float(distances.mean())
-
-                    daily_metrics.append({
-                        'date': date.strftime('%Y-%m-%d'),
-                        'count': len(date_topic_docs),
-                        'drift': drift,
-                        'cohesion': cohesion
-                    })
-                else:
-                    daily_metrics.append({
-                        'date': date.strftime('%Y-%m-%d'),
-                        'count': 0,
-                        'drift': None,
-                        'cohesion': None
-                    })
+                daily_metric = self._calculate_daily_metrics(topic_docs, subtopics, date, embeddings, centroid)
+                daily_metrics.append(daily_metric)
 
             timeline[topic] = {
                 'daily_metrics': daily_metrics,
@@ -110,6 +131,33 @@ class ClusterTracker:
 
         self.cluster_timeline = timeline
         return timeline
+
+    @staticmethod
+    def ADX_indicator(ts, timewindow):
+        # step1 calculate the true range
+        delta = ts.diff()
+        tr = delta.abs()
+        plus_dm = np.where(delta > 0, delta, 0)
+        minus_dm = np.where(delta < 0, -delta, 0)
+
+        tr_s = pd.Series(tr)
+        plus_dm_s = pd.Series(plus_dm, index=delta.index)
+        minus_dm_s = pd.Series(minus_dm, index=delta.index)
+
+        def smooth(s, n):
+            return s.ewm(alpha=1/n, adjust=False, min_periods=timewindow).mean()
+
+        tr_smooth = smooth(tr_s, timewindow)
+        plus_dm_smooth = smooth(plus_dm_s, timewindow)
+        minus_dm_smooth = smooth(minus_dm_s, timewindow)
+
+        plus_di = (plus_dm_smooth / (tr_smooth + 1e-10)) * 100
+        minus_di = (minus_dm_smooth / tr_smooth + 1e-10) * 100
+
+        dx = (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)) * 100
+        adx = smooth(dx, timewindow)
+
+        return pd.DataFrame({'ADX':adx, 'DI+':plus_di, 'DI-':minus_di, 'Slope':adx.diff(), 'Freq':ts}, index=ts.index)
 
     def detect_evolution_events(
         self,
@@ -136,62 +184,34 @@ class ClusterTracker:
         events = []
 
         for topic, timeline_data in self.cluster_timeline.items():
-            daily_metrics = timeline_data['daily_metrics']
-            counts = [m['count'] for m in daily_metrics]
+            daily_metrics = pd.DataFrame(timeline_data['daily_metrics']).set_index('date')['count']
 
             # Skip if not enough data
-            if len(counts) < self.time_window:
+            if len(daily_metrics) < self.time_window:
                 continue
 
-            # Calculate rolling averages
-            for i in range(self.time_window, len(counts)):
-                prev_avg = np.mean(counts[i-self.time_window:i])
-                curr_count = counts[i]
+            adx_metrics = self.ADX_indicator(daily_metrics, self.time_window)
 
-                if prev_avg > 0:
-                    ratio = curr_count / prev_avg
+            # calculate strength of trend(growth, shrinkage, emergence, disappearance) based on ADX
+            def get_trend(adx_row):
+                adx = adx_row['ADX']
+                plus = adx_row['DI+']
+                minus = adx_row['DI-']
+                slope = adx_row['Slope']
 
-                    # Detect growth
-                    if ratio >= growth_threshold:
-                        events.append({
-                            'type': 'growth',
-                            'topic': topic,
-                            'date': daily_metrics[i]['date'],
-                            'ratio': float(ratio),
-                            'prev_avg': float(prev_avg),
-                            'current': curr_count
-                        })
+                direction = 'growth' if plus > minus else 'shrinkage'
+                if adx > 25 and slope < -1.0:
+                    return f'Disappearing {direction}'
+                elif adx > 25:
+                    return f'Strong {direction}'
+                elif adx <= 25 and adx > 10 and slope >0.5:
+                    return f'Emerging {direction}'
+                else:
+                    return "No significant trend"
 
-                    # Detect shrinkage
-                    elif ratio <= shrink_threshold and ratio > 0:
-                        events.append({
-                            'type': 'shrinkage',
-                            'topic': topic,
-                            'date': daily_metrics[i]['date'],
-                            'ratio': float(ratio),
-                            'prev_avg': float(prev_avg),
-                            'current': curr_count
-                        })
+            adx_metrics['trend'] = adx_metrics.apply(get_trend, axis=1)
 
-            # Detect emergence (first appearance)
-            first_nonzero = next((i for i, c in enumerate(counts) if c > 0), None)
-            if first_nonzero is not None and first_nonzero > 0:
-                events.append({
-                    'type': 'emergence',
-                    'topic': topic,
-                    'date': daily_metrics[first_nonzero]['date'],
-                    'count': counts[first_nonzero]
-                })
-
-            # Detect disappearance (last appearance)
-            last_nonzero = len(counts) - 1 - next((i for i, c in enumerate(reversed(counts)) if c > 0), len(counts) - 1)
-            if last_nonzero < len(counts) - self.time_window:
-                events.append({
-                    'type': 'disappearance',
-                    'topic': topic,
-                    'date': daily_metrics[last_nonzero]['date'],
-                    'last_count': counts[last_nonzero]
-                })
+            events.append(adx_metrics)
 
         self.evolution_events = events
         return events

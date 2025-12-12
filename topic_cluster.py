@@ -106,7 +106,7 @@ class BertTopic_doc():
                     for subtopic in subtopics:
                         if subtopic != -1:
                             subtopic_indices = documents[(documents.Topic == topic) & (documents.SubTopic == subtopic)].index.tolist()
-                            if len(subtopic_indices) > 10:
+                            if len(subtopic_indices) > 1:
                                 subtopic_embeddings = umap_embeddings[subtopic_indices]
                                 sub_centroid = subtopic_embeddings.mean(axis=0)
                                 sub_distances = np.linalg.norm(subtopic_embeddings - sub_centroid, axis=1)

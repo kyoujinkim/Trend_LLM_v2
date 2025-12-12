@@ -156,11 +156,12 @@ class TrendDiscoveryPipeline:
         filtered_representative_docs = {}
         for topic in valid_topics:
             if topic in representative_docs:
-                filtered_representative_docs[topic] = {}
-                subtopics = set(cluster_stats[topic]['subtopic_stats'].keys() | {-1})
+                filtered_representative_docs[topic] = representative_docs[topic].copy()
+                filtered_representative_docs[topic]['subdocs'] = {}
+                subtopics = set(cluster_stats[topic]['subtopic_stats'].keys())
                 for subtopic in subtopics:
-                    if subtopic in representative_docs[topic]:
-                        filtered_representative_docs[topic][subtopic] = representative_docs[topic][subtopic]
+                    if representative_docs[topic]['subdocs'].get(subtopic,None):
+                        filtered_representative_docs[topic]['subdocs'].update({subtopic: representative_docs[topic]['subdocs'][subtopic].copy()})
 
         documents = documents.reset_index(drop=True)
 

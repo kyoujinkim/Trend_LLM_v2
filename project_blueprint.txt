@@ -2,28 +2,78 @@ Language of Text : Korean
 
 Purpose of Project : Discover trending topics(phrase) in large text datasets using embedding and clustering techniques.
 
-Steps to Achieve the Purpose:
-1. convert text into embedding.
-- in case to reuse embedding and text, save information into mapper
+Current step of Project : Visualize results
 
-2. load text to process and retrieve embedding from mapper. If embedding is not found, convert text into embedding and save into mapper.
+Dataset to use:
+Cluster_stats is showing base information of cluster.
+cluster_stats ->
+Dict[Dict[topic(int):
+avg_similarity(float),
+cohesion(float),
+cohesion_std(float),
+daily_activity_mean(float),
+date_range_days(int),
+n_subtopics(int),
+size(int),
+subtopic_entropy(float),
+subtopic_stats(Dict)]]
 
-3. process text with embedding
-- use umap to reduce dimension of embedding
-- use clustering algorithm to cluster embedding(e.g. hdbscan)
-- define and extract information of clusters
-- with inside of Topic cluser, various sub-topic can be defined by re-clustering inside of cluster if needed
+subtopic_stats ->
+Dict[Dict[topic(int):
+avg_similarity(float),
+size(int)]]
 
-4. analyze more information from clusters
-- calculate statistics of clusters and sub-clusters(e.g. size, density, distance to other clusters)
-- find relationships between clusters and sub-clusters(e.g. similarity, hierarchy)
-- track changes of clusters over time(e.g. merge, split, grow, shrink). Also, track change of sub cluster inside of cluster
-- cluster(and sub clusters)'s evolution analysis(e.g. cluster lifespan, stability with fft or other methods)
+Timeline is showing trendical change of cluster's time series. Drift is data which showing change of centroid from main cluster's centroid.
+timeline ->
+Dict[Dict[topic(int):
+daily_metrics(list)
+total_documents(int)
+date_range(dict)]]
 
-5. Get Key Phrases from Clusters
-- extract representative phrases for each cluster(by using LLM model, extract keywords from representative text of cluster)
+daily_metrics ->
+Dict[Dict[index:
+date:str,
+count:int,
+drift:float,
+cohesion:float,
+subtopic_0_drift:float,
+subtopic_1_drift:float,
+...]]
 
-5. visualize results
-- plot clusters in 2D or 3D space
-- plot time series data of clusters
-- create interactive visualizations if needed
+date_range ->
+Dict[
+start(str),
+end(str),
+days(int)]
+
+Event is showing trend's regime change such as strong growth, weak shrinkage... etc.
+event ->
+List[
+DataFrame(columns=[ADX,DI+,DI-,Slope,Freq,trend], index=date)]
+]
+
+Stability is showing cluster's information about stability.
+stability ->
+Dict[Dict[topic(int):
+count_mean(float),
+count_std(float),
+coefficient_of_variation(float),
+drift_mean(float),
+drift_std(float),
+stability_score(float),
+fft_analysis(dict)]]
+
+fft_analysis ->
+Dict[
+dominant_frequency(float),
+dominant_period_days(float),
+power_ratio(float),
+is_periodic(bool)]
+
+Purpose of Visualization:
+1. Cluster Overview Dashboard: Create an interactive dashboard that summarizes key statistics from cluster_stats, stability, and timeline data. Include visual elements like bar charts for cluster sizes, line graphs for daily activity trends, and heatmaps for cohesion metrics.
+2. Trend Analysis Graphs: Develop detailed line graphs to visualize daily_metrics for selected clusters, highlighting trends, drifts, and subtopic dynamics over time.
+3. Event Highlighting: Integrate event data into the trend analysis graphs to mark significant regime changes, using annotations or shaded areas to indicate periods of strong growth or shrinkage.
+4. Stability Visualization: Create visual representations of stability metrics, such as scatter plots or radar charts, to illustrate the relationship between stability scores and other factors like drift and count variability.
+5. Interactive Features: Implement interactive features such as tooltips, zooming, and filtering options to allow users to explore the data in depth and focus on specific clusters or time periods.
+6. Summary Reports: Generate automated summary reports that provide insights into the most significant trends and patterns identified in the dataset, supported by the visualizations created.

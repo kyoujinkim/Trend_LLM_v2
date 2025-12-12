@@ -196,7 +196,7 @@ class ClusterAnalyzer:
                 # Filter subtopics
                 sub_topic = pd.DataFrame(stats['subtopic_stats']).T
                 if len(sub_topic)>0:
-                    sub_topic = sub_topic.sort_values('size')
+                    sub_topic = sub_topic.sort_values('size', ascending=False)
                     sub_topic = sub_topic[sub_topic['size'] > 10].iloc[:max_subtopic_size]
                     filtered_subtopics = sub_topic.to_dict(orient='index')
 
