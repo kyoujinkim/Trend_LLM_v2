@@ -1,606 +1,92 @@
-# Trend Discovery Pipeline with LLM
+# Trend_LLM_v2
 
-A sophisticated trend discovery system for analyzing large-scale Korean text datasets using advanced embedding, clustering, and LLM-based keyphrase extraction techniques.
+한국어 뉴스의 **임베딩 → 계층적 주제 군집 → 군집 분석 → 시간 추적 → LLM 핵심어 → 시각화**를 연결하는 트렌드 탐색 파이프라인입니다. 이전 키워드 중심 방식에서 벗어나, 문서 임베딩으로 유사 문서를 묶고 LLM은 해석 단계에 활용합니다.
 
-## Overview
 
-This project implements an end-to-end pipeline for discovering and tracking trending topics in text data (primarily Korean news articles). It combines modern NLP techniques including transformer-based embeddings, UMAP dimensionality reduction, hierarchical clustering, and LLM-powered keyphrase extraction to identify, analyze, and visualize emerging trends over time.
+## 연구 결과
 
-## Key Features
+2025-10-31 보고서는 주요 산업 3개와 신규 부상 산업 3개를 매월 선택해 동일 비중으로 투자했을 때 **전체 구간의 83.3%에서 KOSPI 대비 초과성과**를 기록했다고 보고합니다. 본문은 분석 자료를 2023년 11월~2025년 10월로 설명하지만, 그림 3의 가로축은 2024년 12월~2025년 11월로 표시돼 있습니다. 구간의 수와 정확한 산정 기간은 원자료로 추가 확인해야 합니다.
 
-- **Efficient Embedding Generation**: Converts text to high-quality embeddings using Google's EmbeddingGemma model with intelligent caching
-- **Hierarchical Topic Discovery**: Identifies main topics and sub-topics using BERTopic with HDBSCAN clustering
-- **Temporal Evolution Tracking**: Monitors how topics emerge, grow, merge, split, and decline over time
-- **LLM-Powered Keyphrase Extraction**: Uses GPT-4 or EXAONE models to extract representative keyphrases for each topic
-- **Comprehensive Analytics**: Calculates cluster statistics, relationships, and stability metrics
-- **Rich Visualizations**: Generates 2D/3D plots, interactive dashboards, timelines, and heatmaps
+보고서의 방법론은 TF-IDF·시계열 추세·지수 감쇠를 활용한 관련 Trend LLM 연구입니다. 현재 v2의 임베딩·BERTopic 중심 파이프라인과 동일한 구현의 검증 결과로 간주하지 않습니다. 또한 83.3%는 산업 포트폴리오의 구간별 BM 초과 비율이며, 키워드 분류 정확도나 연환산 수익률이 아닙니다.
 
-## Pipeline Architecture
+보고서에는 2024년 11월~2025년 10월 기사 **178,515건**을 사용한 분석 예시와, 데이터센터·삼성전자 분기 실적 등의 트렌드 수명 사례도 포함됩니다. 개별 수명 확률 사례만으로 전체 확률 예측의 보정 성능이 검증되지는 않습니다. 한국어 최적화와 선형 추세 추정의 한계도 명시돼 있습니다.
 
-The pipeline consists of 6 sequential steps:
+출처: [251030_트렌드_키워드_추출모델.pdf](https://github.com/kyoujinkim/Trend_LLM_v2/blob/master/251030_%ED%8A%B8%EB%A0%8C%EB%93%9C_%ED%82%A4%EC%9B%8C%EB%93%9C_%EC%B6%94%EC%B6%9C%EB%AA%A8%EB%8D%B8.pdf) — PDF 5, 37쪽 — 성능·한계 5쪽, 기사 분석 예시 37쪽.
 
-### Step 1: Generate Embeddings
-- Converts text documents into dense vector representations
-- Uses efficient batch processing with caching via `emb_mapper.json`
-- Supports incremental updates to avoid reprocessing existing data
-- Model: `google/embeddinggemma-300M`
+## 주요 기능
 
-### Step 2: Cluster Topics
-- Reduces dimensionality using UMAP
-- Clusters embeddings using BERTopic (built on HDBSCAN)
-- Identifies main topics through density-based clustering
-- **Hierarchical Sub-clustering**: Re-clusters documents within each main topic to discover sub-topics
-  - Only topics with >100 documents are sub-clustered
-  - Uses smaller `min_cluster_size` (1/5 of main topic minimum) for finer granularity
-  - Each document gets both a `Topic` (main cluster) and `Subtopic` (sub-cluster) assignment
-- Handles outliers and noise automatically
-- Outliers (Topic=-1) are re-clustered iteratively to discover emerging patterns
+- SentenceTransformer 기반 문서 임베딩과 `emb_mapper.json` 캐시
+- UMAP·BERTopic/HDBSCAN 기반 주제 군집과 큰 군집 내부의 하위 주제 탐색
+- 크기·내부 유사도·하위 주제 다양성·군집 관계 분석
+- 주제의 출현·성장·감소·병합·분리와 안정성 추적
+- 대표 문서를 활용한 상위·하위 주제 핵심어 추출
+- 정적 그림·Plotly HTML·타임라인·히트맵 생성
 
-### Step 3: Analyze Clusters
-- Calculates cluster statistics (size, density, centroid positions)
-- **Sub-cluster Analysis**: For each main topic, analyzes sub-topic characteristics
-  - Calculates sub-topic size and internal similarity
-  - Measures sub-topic entropy (diversity of sub-topics within main topic)
-  - Identifies number of distinct sub-topics per main topic
-- Finds relationships between clusters (similarity, hierarchy)
-- Filters clusters and sub-clusters based on configurable thresholds:
-  - `max_topic_size`: Maximum number of main topics to retain
-  - `max_subtopic_size`: Maximum number of sub-topics to retain per main topic
-  - Quality filtering: Removes low-quality clusters (size <10 AND similarity <0.5)
-- Generates comprehensive analytical reports with hierarchical structure
+## 현재 실행 순서
 
-### Step 4: Track Evolution
-- Creates timeline of cluster appearances and changes
-- Detects evolution events (emergence, growth, decline)
-- Identifies merge and split events between main topics
-- Analyzes stability using FFT and other metrics
-- **Note**: Currently tracks main topic evolution; sub-topic temporal tracking is a planned enhancement (see ALGORITHM_IMPROVEMENTS.md)
+| 단계 | 구현 |
+|---|---|
+| 1. 임베딩 | `text_to_embedding.py` |
+| 2. 군집화 | `topic_cluster.py` |
+| 3. 분석·필터 | `cluster_analyzer.py` |
+| 4. 시간 추적 | `cluster_tracker.py` |
+| 5. 핵심어 | `llm_keyphrase_extractor.py` |
+| 6. 시각화 | `visualizer.py` |
 
-### Step 5: Extract Keyphrases
-- Uses LLM to extract representative keywords for each topic
-- **Two-Level Keyphrase Extraction**:
-  - Main topic keyphrases: From representative documents of entire cluster
-  - Sub-topic keyphrases: From representative documents of each sub-cluster
-- Supports multiple LLM backends (OpenAI GPT-4, EXAONE)
-- Saves hierarchical keyphrase structure for visualization
+`main.py`의 실제 실행 블록 기준입니다. 기존 문서·CLI 도움말의 단계 번호와 일부 다릅니다. 현재 코드에는 파싱 후 `args.step = 0`이 있어 `--step`을 줘도 전체 단계로 덮어씁니다. 단계별 실행이 필요하면 이 부분과 캐시 로딩·도움말을 함께 수정해야 합니다.
 
-### Step 6: Visualize
-- 2D/3D cluster visualizations
-- Interactive HTML dashboards
-- Cluster size distributions
-- Timeline plots and heatmaps
-- Korean font support for labels
+## 설치·설정
 
-## Installation
-
-### Prerequisites
-- Python 3.8+
-- CUDA-compatible GPU (recommended for faster processing)
-
-### Dependencies
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-Key packages:
-- `torch` - Deep learning framework
-- `transformers` - Hugging Face transformers library
-- `umap-learn` - Dimensionality reduction
-- `hdbscan` - Density-based clustering
-- `bertopic` - Topic modeling
-- `pandas`, `numpy` - Data manipulation
-- `matplotlib`, `plotly` - Visualization
-- `openai` - LLM API access
+GPU는 임베딩·로컬 LLM 처리 시간을 줄이는 데 도움이 되지만 장치·dtype·메모리 설정은 사용하는 모델과 맞춰야 합니다. 의존성 파일에는 서로 다른 시기의 패키지 버전이 섞일 수 있어 실제 환경에서 설치 호환성을 확인하세요.
 
-## Configuration
+`project_config.ini`가 프로젝트 설정을 담당합니다.
 
-### 1. Project Configuration (`project_config.ini`)
+| 섹션 | 주요 값 |
+|---|---|
+| `[embedding]` | `model_id`, `batch_size`, `iterate_size` |
+| `[data]` | `data_path`, `news_path` |
+| `[clustering]` | `min_topic_size`, `max_topic_size`, `max_subtopic_size` |
+| `[keyphraseextract]` | 모델 종류·ID, 핵심어 수, 생성 길이 |
 
-```ini
-[embedding]
-model_id = google/embeddinggemma-300M
-batch_size = 64
-iterate_size = 20480
+현재 임베딩 모델 ID는 `google/embeddinggemma-300M`입니다. 모델 이름의 `300M`을 임베딩 벡터 차원으로 해석해서는 안 됩니다. 핵심어 추출은 설정된 OpenAI 또는 로컬 모델 경로를 사용합니다.
 
-[data]
-data_path = ./data
-news_path = ./data/news
+실제 인증정보는 코드가 읽는 별도 INI에 `[huggingface] token`, `[openai] api_key` 형식으로 준비합니다. 현재 `main.py`와 임베딩 진입점은 `D:/config.ini`를 읽으므로 환경에 맞게 변경해야 합니다. `setup.py`가 안내하는 설정 경로와도 일치시켜야 합니다.
 
-[clustering]
-min_topic_size = 10          # Minimum documents per topic
-max_topic_size = 10          # Maximum topics to retain
-max_subtopic_size = 5        # Maximum subtopics per topic
+## 뉴스 데이터
 
-[keyphraseextract]
-model_class = openai
-model_id = gpt-4.1-nano
-max_keyphrase = 5            # Maximum keyphrases per topic
-max_new_tokens = 250
-```
-
-### 2. API Configuration (`D:/config.ini`)
-
-Create a separate config file for API credentials:
-```ini
-[huggingface]
-token = your_hf_token_here
-
-[openai]
-api_key = your_openai_key_here
-```
-
-### 3. Data Structure
-
-Organize your data as follows:
-```
+```text
 data/
-├── news/                    # Input CSV files with news articles
-│   ├── news_2024_01.csv
-│   └── news_2024_02.csv
-├── embeddings/              # Generated embeddings (auto-created)
-├── emb_mapper.json          # Embedding index mapping (auto-created)
-└── output/                  # Pipeline results (auto-created)
-    ├── model/               # Trained models
-    ├── analysis/            # Cluster analysis results
-    ├── tracking/            # Evolution tracking data
-    ├── visualizations/      # Generated plots
-    ├── topic_keywords.json
-    └── subtopic_keywords.json
+├── news/*.csv
+├── embeddings/
+├── emb_mapper.json
+└── output/
 ```
 
-### Expected CSV Format
+CSV는 `class`, `date`, `time`, `source`, `kind`, `title`, `content` 등의 필드를 사용합니다. 메타데이터 조합이 캐시 식별에 쓰이므로 중복·날짜 형식·문서 변경 정책을 함께 관리해야 합니다. 같은 캐시 키로 본문이 바뀌는 경우 재생성이 필요한지 확인하세요.
 
-Input CSV files should contain:
-- `class`: Document category
-- `date`: Publication date
-- `time`: Publication time
-- `source`: News source
-- `kind`: Article type
-- `title`: Article title
-- `content`: Article content (may include XML tags)
+## 실행
 
-## Quick Start
-
-### 1. Setup
+설정·모델 접근·충분한 뉴스 데이터를 준비한 뒤 저장소 루트에서 실행합니다.
 
 ```bash
-# Run setup script to install dependencies and create directory structure
-python setup.py
-
-# Or manually install dependencies
-pip install -r requirements.txt
+python main.py --stdate 2026-01-01 --enddate 2026-03-31
+python main.py --skip-llm --skip-visualization
 ```
 
-### 2. Configure API Keys
+날짜는 보유 데이터에 맞게 바꿉니다. `--skip-llm`은 핵심어 생성을 생략하며 임베딩 모델 초기화·접근까지 모두 생략하는 것은 아닙니다. `--load-model`은 현재 `store_true`와 기본값 `True`로 선언돼 있어 CLI에서 끄는 옵션이 없습니다. 최초 학습을 수행할지, 기존 모델을 읽을지 코드·캐시 상태를 먼저 맞춰야 합니다.
 
-Edit the API configuration file created by setup:
-```bash
-# File location: ~/trend_pipeline_api_config.ini (or custom location)
-# Add your HuggingFace token and OpenAI API key
-```
+## 결과와 탐색
 
-### 3. Add Data
+주요 산출물은 `data/output/` 아래 모델·분석·추적·시각화, `topic_keywords.json`, `subtopic_keywords.json`, 캐시 파일입니다. `analyze_results.py`, `explore_clusters.py`, `examples/`는 후속 탐색과 사용 예제를 제공합니다. 실제 옵션은 각 스크립트를 확인하세요.
 
-Place your CSV files in `data/news/` directory.
+상위 주제와 하위 주제는 서로 다른 해상도의 군집입니다. `Topic=-1` 같은 노이즈 표시는 별도 군집으로 해석하지 않도록 주의해야 합니다. 하위 주제의 시간 추적 범위는 상위 주제 추적과 구분해 확인하세요.
 
-### 4. Run Pipeline
+## 해석·기존 문서
 
-```bash
-# Run complete pipeline
-python main.py
+언급량 증가가 투자성과나 사회 전체 관심을 직접 뜻하지는 않습니다. 매체 구성·수집 누락·중복 기사·임베딩 모델·군집 임계값이 결과에 영향을 줍니다. 실제 뉴스 원문·모델·외부 LLM 전송에는 각각의 사용 권한이 필요합니다.
 
-# Or use the quick start example
-python examples/quick_start.py
-```
-
-## Usage
-
-### Basic Usage (Run All Steps)
-
-```bash
-python main.py
-```
-
-### Run Specific Steps
-
-```bash
-# Run only embedding generation
-python main.py --step 1
-
-# Run only clustering
-python main.py --step 2
-
-# Run analysis
-python main.py --step 3
-
-# Run evolution tracking
-python main.py --step 4
-
-# Run keyphrase extraction
-python main.py --step 5
-
-# Run visualization
-python main.py --step 6
-```
-
-### Advanced Options
-
-```bash
-# Filter data by date range
-python main.py --stdate 2024-01-01 --enddate 2024-12-31
-
-# Force regenerate embeddings
-python main.py --force-regenerate
-
-# Load existing model instead of training new one
-python main.py --load-model
-
-# Skip LLM keyword extraction (faster, but less descriptive)
-python main.py --skip-llm
-
-# Skip visualization
-python main.py --skip-visualization
-```
-
-### Analysis and Exploration
-
-After running the pipeline, use these scripts to explore results:
-
-```bash
-# Generate comprehensive summary report
-python analyze_results.py --summary
-
-# Generate topic-specific report
-python analyze_results.py --topic 0
-
-# Save report to file
-python analyze_results.py --summary --save report.txt
-
-# Export CSV summary
-python analyze_results.py --csv
-
-# Explore clusters interactively
-python explore_clusters.py
-
-# View specific topic
-python explore_clusters.py --topic 0
-
-# View sub-topic
-python explore_clusters.py --topic 0 --subtopic 1
-
-# Compare multiple topics
-python explore_clusters.py --compare 0 1 2
-
-# Search for keyword
-python explore_clusters.py --search "artificial intelligence"
-
-# Export topic to CSV
-python explore_clusters.py --topic 0 --export topic_0.csv
-
-# Interactive mode
-python explore_clusters.py --interactive
-```
-
-### Example Scripts
-
-The `examples/` directory contains sample scripts:
-
-```bash
-# Quick start guide
-python examples/quick_start.py
-
-# Incremental update workflow
-python examples/incremental_update.py
-
-# Custom analysis examples
-python examples/custom_analysis.py
-```
-
-## Output Files
-
-### Model Files
-- `output/model/` - BERTopic model files
-- `output/cache.pkl` - Cached intermediate results
-
-### Analysis Results
-- `output/topic_keywords.json` - Main topic keyphrases
-- `output/subtopic_keywords.json` - Subtopic keyphrases
-- `output/tracking/timeline_data.json` - Temporal evolution data
-- `output/tracking/stability_metrics.json` - Cluster stability analysis
-- `output/tracking/merge_split_events.json` - Detected merge/split events
-
-### Visualizations
-- `output/visualizations/clusters_2d.png` - 2D cluster plot
-- `output/visualizations/clusters_3d.html` - Interactive 3D visualization
-- `output/visualizations/cluster_sizes.png` - Cluster size distribution
-- `output/visualizations/cluster_timeline.png` - Temporal evolution
-- `output/visualizations/cluster_heatmap.png` - Cluster activity heatmap
-- `output/visualizations/interactive_dashboard.html` - Complete interactive dashboard
-
-## Algorithm Details
-
-### Embedding Strategy
-Uses Google's EmbeddingGemma model to convert text into 300-dimensional embeddings. The mapper system creates unique keys from document metadata to enable efficient caching and prevent redundant computation.
-
-### Clustering Approach
-1. **UMAP Reduction**: Reduces embedding dimensionality while preserving local structure
-2. **HDBSCAN Clustering**: Density-based clustering that automatically determines number of clusters
-3. **Hierarchical Re-clustering**: Re-clusters within each main topic to discover sub-topics
-4. **Outlier Handling**: Documents that don't fit any cluster are marked as outliers (Topic -1)
-
-### Evolution Tracking
-- **Time Windows**: Analyzes clusters in rolling time windows (default: 7 days)
-- **Event Detection**: Identifies when clusters emerge, grow, shrink, merge, or split
-- **Stability Analysis**: Uses FFT to analyze periodic patterns and stability
-- **Centroid Tracking**: Monitors cluster centroid movement in embedding space
-
-### Keyphrase Extraction
-Uses LLM with carefully crafted prompts to extract meaningful keyphrases from representative documents. The LLM considers:
-- Document content and context
-- Temporal relevance
-- Semantic coherence
-- Conciseness and clarity
-
-## Hierarchical Cluster Structure
-
-### Understanding Main Topics and Sub-Topics
-
-The pipeline creates a **two-level hierarchical structure**:
-
-1. **Main Topics (Level 1)**: Broad thematic clusters discovered by HDBSCAN
-   - Each document receives a `Topic` ID (0, 1, 2, ... or -1 for outliers)
-   - Represents overarching themes in the dataset
-
-2. **Sub-Topics (Level 2)**: Finer-grained clusters within each main topic
-   - Each document also receives a `Subtopic` ID within its main topic
-   - Represents specific aspects or nuances within the broader theme
-   - Only created for topics with >100 documents
-
-### Example Hierarchical Structure
-
-```
-Topic 0: "Technology and AI" (500 documents)
-├── Subtopic 0: "ChatGPT and LLMs" (150 docs)
-├── Subtopic 1: "AI Regulation" (120 docs)
-├── Subtopic 2: "Computer Vision" (100 docs)
-└── Subtopic -1: "Outliers within Topic 0" (130 docs)
-
-Topic 1: "Economic Policy" (450 documents)
-├── Subtopic 0: "Interest Rates" (180 docs)
-├── Subtopic 1: "Inflation" (150 docs)
-└── Subtopic -1: "Outliers within Topic 1" (120 docs)
-
-Topic -1: "Outliers" (200 documents)
-└── Subtopic -1: "No sub-clustering" (200 docs)
-```
-
-### Interpreting Sub-Cluster Data
-
-#### 1. Cluster Statistics Output
-
-The `cluster_statistics.json` file contains hierarchical data:
-
-```json
-{
-  "0": {
-    "size": 500,
-    "avg_similarity": 0.75,
-    "n_subtopics": 3,
-    "subtopic_entropy": 1.05,
-    "subtopic_stats": {
-      "0": {"size": 150, "avg_similarity": 0.82},
-      "1": {"size": 120, "avg_similarity": 0.78},
-      "2": {"size": 100, "avg_similarity": 0.80}
-    }
-  }
-}
-```
-
-**Key Metrics**:
-- `n_subtopics`: Number of distinct sub-clusters (excluding outliers)
-- `subtopic_entropy`: Diversity of sub-topics (higher = more diverse distribution)
-  - Low entropy (~0): Most documents in one sub-topic
-  - High entropy (>2): Documents evenly distributed across sub-topics
-- `subtopic_stats`: Per-subtopic statistics
-  - `size`: Number of documents in sub-topic
-  - `avg_similarity`: Internal coherence of sub-topic (higher = tighter cluster)
-
-#### 2. Keyphrase Hierarchy
-
-The keyphrase extraction creates a hierarchical structure:
-
-**`topic_keywords.json`** - Main topic keywords:
-```json
-{
-  "0": ["artificial intelligence", "machine learning", "technology"],
-  "1": ["economic policy", "central bank", "monetary policy"]
-}
-```
-
-**`subtopic_keywords.json`** - Sub-topic keywords:
-```json
-{
-  "0": {
-    "0": ["ChatGPT", "large language models", "GPT-4"],
-    "1": ["AI regulation", "ethics", "governance"],
-    "2": ["computer vision", "image recognition", "autonomous vehicles"]
-  },
-  "1": {
-    "0": ["interest rates", "federal reserve", "rate hikes"],
-    "1": ["inflation", "consumer prices", "CPI"]
-  }
-}
-```
-
-#### 3. Document-Level Assignment
-
-Each document in your DataFrame has two columns:
-
-```python
-# Example document assignments
-doc_1: Topic=0, Subtopic=0  # Main topic 0, sub-topic 0
-doc_2: Topic=0, Subtopic=1  # Main topic 0, sub-topic 1
-doc_3: Topic=0, Subtopic=-1 # Main topic 0, outlier within topic
-doc_4: Topic=-1, Subtopic=-1 # Global outlier
-```
-
-### Sub-Cluster Quality Filtering
-
-The `filter_clusters_by_stat()` method applies hierarchical filtering:
-
-1. **Main Topic Filtering**:
-   - Removes topics with `size < 10 AND avg_similarity < 0.5`
-   - Keeps only top `max_topic_size` topics (default: 10)
-
-2. **Sub-Topic Filtering** (within each main topic):
-   - Keeps only sub-topics with `size > 10`
-   - Sorts by `avg_similarity` (descending)
-   - Keeps only top `max_subtopic_size` sub-topics (default: 5)
-
-### Working with Sub-Cluster Data
-
-#### Accessing Sub-Clusters Programmatically
-
-```python
-import json
-import pandas as pd
-
-# Load cluster statistics
-with open('output/analysis/cluster_statistics.json', 'r') as f:
-    stats = json.load(f)
-
-# Get all sub-topics for Topic 0
-topic_0_subtopics = stats['0']['subtopic_stats']
-
-# Iterate through all topics and their sub-topics
-for topic_id, topic_info in stats.items():
-    print(f"Topic {topic_id}: {topic_info['size']} documents, {topic_info['n_subtopics']} sub-topics")
-
-    for subtopic_id, subtopic_info in topic_info['subtopic_stats'].items():
-        print(f"  Sub-topic {subtopic_id}: {subtopic_info['size']} docs, sim={subtopic_info['avg_similarity']:.2f}")
-
-# Load documents with assignments
-documents = pd.read_pickle('output/cache.pkl')['documents']
-
-# Filter documents by topic and subtopic
-topic_0_subtopic_1 = documents[(documents['Topic'] == 0) & (documents['Subtopic'] == 1)]
-```
-
-### Current Limitations and Future Work
-
-**Current Sub-Cluster Capabilities**:
-- ✅ Hierarchical clustering and assignment
-- ✅ Sub-cluster statistics and quality metrics
-- ✅ Separate keyphrase extraction for sub-topics
-- ✅ Filtering and quality control
-
-**Planned Enhancements** (see `ALGORITHM_IMPROVEMENTS.md`):
-- ⏳ **Sub-Topic Temporal Tracking**: Track how sub-topics evolve over time
-- ⏳ **Sub-Topic Merge/Split Detection**: Identify when sub-topics merge or split
-- ⏳ **Multi-Level Hierarchy**: Support >2 levels of clustering
-- ⏳ **Sub-Topic Relationships**: Analyze relationships between sub-topics across main topics
-- ⏳ **Sub-Topic Visualizations**: Dedicated visualizations for hierarchical structure
-
-## Performance Considerations
-
-### Memory Management
-- Embeddings are loaded on-demand to reduce memory footprint
-- Models are cleaned up after use
-- Large arrays use memory-mapped files when possible
-
-### Processing Speed
-- Batch processing for embeddings (configurable batch size)
-- Parallel processing where applicable
-- Incremental updates to avoid reprocessing
-
-### Scalability
-- Designed for datasets with 10K-1M+ documents
-- UMAP and HDBSCAN scale well to large datasets
-- Caching prevents redundant computation
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Out of Memory Errors**
-- Reduce `batch_size` in config
-- Process data in smaller date ranges
-- Use smaller embedding model
-
-**2. Too Many/Few Topics**
-- Adjust `min_topic_size` (higher = fewer topics)
-- Modify UMAP parameters in `topic_cluster.py`
-- Filter outliers more aggressively
-
-**3. Poor Keyword Quality**
-- Use more powerful LLM model
-- Increase `max_new_tokens`
-- Ensure representative documents are diverse
-
-**4. Slow Processing**
-- Enable GPU acceleration
-- Increase `batch_size` if memory allows
-- Use `--load-model` to skip retraining
-
-## Project Structure
-
-### Core Modules
-
-- **`main.py`**: Main pipeline orchestrator
-- **`text_to_embedding.py`**: Text-to-embedding conversion with caching
-- **`topic_cluster.py`**: BERTopic clustering implementation with hierarchical sub-clustering
-- **`cluster_analyzer.py`**: Cluster statistics and relationship analysis
-- **`cluster_tracker.py`**: Temporal evolution tracking
-- **`llm_keyphrase_extractor.py`**: LLM-based keyphrase extraction
-- **`visualizer.py`**: Visualization generation
-
-### Utility Scripts
-
-- **`setup.py`**: Installation and setup automation
-- **`analyze_results.py`**: Generate comprehensive analysis reports
-- **`explore_clusters.py`**: Interactive cluster exploration tool
-- **`requirements.txt`**: Python package dependencies
-
-### Examples
-
-- **`examples/quick_start.py`**: Complete pipeline walkthrough
-- **`examples/incremental_update.py`**: Add new data without reprocessing
-- **`examples/custom_analysis.py`**: Custom analysis templates
-
-## Future Enhancements
-
-See `ALGORITHM_IMPROVEMENTS.md` for detailed algorithm improvement proposals including:
-- Adaptive clustering parameters
-- Ensemble methods
-- Real-time incremental updates
-- Cross-lingual support
-- Enhanced temporal weighting
-- Improved outlier handling
-
-## Contributing
-
-Contributions are welcome! Please ensure:
-- Code follows existing style conventions
-- New features include appropriate documentation
-- Complex algorithms include explanatory comments
-
-## License
-
-[Specify your license here]
-
-## Citation
-
-If you use this pipeline in your research, please cite:
-```
-[Add citation information]
-```
-
-## Contact
-
-[Add contact information]
-
-## Acknowledgments
-
-- Built with BERTopic, UMAP, and HDBSCAN
-- Powered by Google EmbeddingGemma and OpenAI GPT models
-- Inspired by modern topic modeling and trend analysis research
+상세한 계층 군집 예시·과거 설정·추가 탐색 안내는 [이전 README](README.previous.md)에 보존했습니다. 현재 실행 동작은 이 문서와 소스를 우선합니다.
